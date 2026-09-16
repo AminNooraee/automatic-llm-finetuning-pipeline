@@ -1,0 +1,31 @@
+model:
+  # Model family and LLaMA-Factory template are resolved automatically.
+  name: Qwen/Qwen2.5-0.5B-Instruct
+
+dataset:
+  path: ../examples/datasets/alpaca_demo.json
+  name: demo_dataset
+  # Source formats: auto, json, jsonl, csv, parquet, chatml_text, huggingface
+  source_format: auto
+  # Dataset formats: auto, alpaca, instruction_response, prompt_completion,
+  # qa_json, rag_qa, openai_chat, sharegpt, chatml, dpo
+  format: auto
+
+training:
+  method: lora
+  epochs: 1
+  learning_rate: 0.0002
+  batch_size: 1
+  precision: fp32
+  gradient_checkpointing: false
+  cutoff_len: 2048
+  save_steps: 10
+  logging_steps: 1
+  lora:
+    rank: 8
+    alpha: 16
+    dropout: 0.0
+
+output:
+  # Each execution creates a unique timestamped directory under this path.
+  runs_path: ../runs

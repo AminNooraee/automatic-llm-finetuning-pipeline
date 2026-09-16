@@ -1,0 +1,12 @@
+[
+  {
+    "instruction": "What is artificial intelligence?",
+    "input": "",
+    "output": "Artificial intelligence is the field of creating systems that can perform tasks requiring human intelligence."
+  },
+  {
+    "instruction": "Explain machine learning.",
+    "input": "",
+    "output": "Machine learning is a branch of AI where models learn patterns from data."
+  }
+]

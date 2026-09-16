@@ -1,0 +1,11 @@
+[
+  {
+    "messages": [
+      {"role": "system", "content": "Answer briefly."},
+      {"role": "user", "content": "Say hello."},
+      {"role": "assistant", "content": "Hello!"},
+      {"role": "user", "content": "What is two plus two?"},
+      {"role": "assistant", "content": "Two plus two is four."}
+    ]
+  }
+]

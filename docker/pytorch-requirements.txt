@@ -1,0 +1,5 @@
+# Matched Linux CPU/cu128 wheels. The selected base sets the wheel index.
+# Kept separate from requirements.txt, which intentionally leaves host selection open.
+torch==2.11.0
+torchvision==0.26.0
+torchaudio==2.11.0

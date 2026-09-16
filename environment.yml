@@ -1,0 +1,9 @@
+# Optional Conda Python bootstrap, NOT a full CPU/CUDA environment lock.
+# After activation, install matching PyTorch builds and requirements.txt as
+# documented in docs/installation.md. Never reuse the existing venv as Conda.
+name: automatic-llm-finetuning
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.7
+  - pip=24.2

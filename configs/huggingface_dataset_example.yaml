@@ -1,0 +1,29 @@
+# The one-row HuggingFace mechanics test used in final acceptance.
+# This demo review corpus is NOT recommended for meaningful model training.
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+dataset:
+  path: lhoestq/demo1
+  name: hf_demo_acceptance
+  source_format: auto
+  format: auto
+  split: train[4:5]
+  columns:
+    instruction: package_name
+    output: review
+training:
+  method: lora
+  epochs: 1
+  learning_rate: 0.0002
+  batch_size: 1
+  precision: fp32
+  gradient_checkpointing: false
+  cutoff_len: 128
+  save_steps: 10
+  logging_steps: 1
+  lora:
+    rank: 2
+    alpha: 4
+    dropout: 0.0
+output:
+  runs_path: ../runs

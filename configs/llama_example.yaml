@@ -1,0 +1,25 @@
+# Configuration example, NOT a validated training recipe.
+# Gated model access and a suitable BF16-capable training host are required.
+model:
+  name: meta-llama/Meta-Llama-3-8B-Instruct
+dataset:
+  path: ../examples/datasets/alpaca_demo.json
+  name: llama_demo
+  source_format: auto
+  format: auto
+training:
+  method: lora
+  epochs: 1
+  learning_rate: 0.0002
+  batch_size: 1
+  precision: bf16
+  gradient_checkpointing: true
+  cutoff_len: 2048
+  save_steps: 100
+  logging_steps: 10
+  lora:
+    rank: 8
+    alpha: 16
+    dropout: 0.05
+output:
+  runs_path: ../runs

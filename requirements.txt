@@ -1,0 +1,21 @@
+# Training application baseline; install platform-specific PyTorch first.
+# See docs/installation.md. These pins reflect the validated integration stack,
+# not a complete hash-locked, cross-platform dependency export.
+-e .
+PyYAML==6.0.3
+transformers==5.8.0
+accelerate==1.11.0
+peft==0.18.1
+trl==0.24.0
+datasets==4.0.0
+pyarrow==25.0.1
+safetensors==0.8.0
+
+# Immutable upstream source revision, not the moving development branch.
+# Requires Git and network access for a new installation.
+llamafactory @ git+https://github.com/hiyouga/LLaMA-Factory.git@97b32d3133b501432141a82949d5c7bc4d94f23a
+
+# torch/torchvision/torchaudio are dependencies of LLaMA-Factory. Their CPU/CUDA
+# distributions must be chosen together for the host; they are not hardware-
+# locked here. HF/Parquet imports remain lazy in the adapter framework itself,
+# although the complete upstream training environment requires datasets.

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "automatic-llm-finetuning-pipeline"
+version = "1.0.0"
+description = "Configuration-driven LLaMA-Factory fine-tuning with traceable runs"
+readme = "README.md"
+requires-python = ">=3.11"
+# The complete pinned training environment is installed by requirements.txt.
+dependencies = ["PyYAML==6.0.3"]
+license = "Apache-2.0"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fine_tuning_pipeline*"]
+
+# Configs/examples stay in the checkout. Editable/source-checkout execution is
+# supported; standalone wheel distribution is not claimed by this relocation.

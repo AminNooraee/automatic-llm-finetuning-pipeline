@@ -1,0 +1,24 @@
+# Small CPU-oriented example. Paths are relative to this configs/ directory.
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+dataset:
+  path: ../examples/datasets/alpaca_demo.json
+  name: qwen_demo
+  source_format: auto
+  format: auto
+training:
+  method: lora
+  epochs: 1
+  learning_rate: 0.0002
+  batch_size: 1
+  precision: fp32
+  gradient_checkpointing: false
+  cutoff_len: 128
+  save_steps: 10
+  logging_steps: 1
+  lora:
+    rank: 8
+    alpha: 16
+    dropout: 0.0
+output:
+  runs_path: ../runs

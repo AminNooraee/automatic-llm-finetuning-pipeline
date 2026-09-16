@@ -1,0 +1,65 @@
+# Virtual environments and Python build/cache output
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Private execution artifacts: never publish training data, logs, or weights
+/runs/
+/models/
+/checkpoints/
+checkpoint-*/
+.cache/
+.huggingface/
+hf_cache/
+huggingface_cache/
+/tmp*/
+# Old runtime/evidence/cache directories remain in place after source relocation.
+/fine_tuning_pipeline/
+*.log
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+/tests/tmp*/
+/src/fine_tuning_pipeline/tmp*/
+
+# Public synthetic data lives under examples/datasets/ now.
+/datasets/
+
+# Third-party checkout is installed from the pinned dependency revision
+/LLaMA-Factory/
+
+# Other projects are outside this Project #1 publication
+/benchmark_pipeline/
+
+# Local configuration, credentials, and machine files
+secrets/
+credentials/
+credentials.json
+credentials.yaml
+credentials.yml
+.netrc
+.pypirc
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+*.local.yaml
+*.local.yml
+*.pem
+*.key
+.DS_Store
+Thumbs.db
+/.idea/
+/.vscode/
