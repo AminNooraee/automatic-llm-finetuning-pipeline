@@ -12,11 +12,32 @@ LLaMA-Factory options the wrapper does not expose.
 | --- | --- | --- |
 | `model.name` | Yes | Nonempty HuggingFace identifier for a supported family |
 | `model.template` | No | Automatic by default; an incompatible explicit override fails |
+| `model.revision` | No | Hub branch, tag, or commit passed as `model_revision`; resolved commit is recorded when available |
 
 Do not supply `family` to select behavior. Family/template are resolved and
 recorded automatically. Config inspection can fall back to a recognizable name
 with a warning when fetching is unavailable. Name/config conflicts, unsupported
 families, and uncertain Llama generation stop preparation before training.
+Revision lookup is best-effort: cached/offline runs remain supported, and
+metadata records why a resolved Hub commit was unavailable.
+
+## Optional container provenance
+
+An orchestrator may supply non-secret image identity under `provenance.container`:
+
+```yaml
+provenance:
+  container:
+    image: registry.example/fine-tuner:h100
+    image_id: sha256:...
+    image_digest: sha256:...
+    runtime: docker
+```
+
+The launcher variables `PIPELINE_CONTAINER_IMAGE`,
+`PIPELINE_CONTAINER_IMAGE_ID`, `PIPELINE_CONTAINER_IMAGE_DIGEST`,
+`PIPELINE_CONTAINER_RUNTIME`, `PIPELINE_CONTAINER_ID`, and
+`PIPELINE_CONTAINERIZED` take precedence. Never put credentials in these values.
 
 ## Dataset
 

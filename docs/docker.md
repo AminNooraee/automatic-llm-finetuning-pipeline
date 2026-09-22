@@ -147,6 +147,21 @@ Each training execution still creates a new isolated run. Check host
 `runs/<run_id>/metadata.json`, `logs/train.log`, and the verified `model/` output;
 container completion alone does not substitute for pipeline artifact validation.
 
+Docker does not reliably expose its own image tag or digest inside a generic
+container. A launcher that needs exact provenance should pass non-secret values:
+
+```bash
+docker run --rm --gpus all \
+  -e PIPELINE_CONTAINERIZED=true \
+  -e PIPELINE_CONTAINER_RUNTIME=docker \
+  -e PIPELINE_CONTAINER_IMAGE=automatic-llm-finetuner:cuda \
+  -e PIPELINE_CONTAINER_IMAGE_DIGEST=sha256:... \
+  ...
+```
+
+Unavailable values stay null and never fail training. Common container markers
+are detected, but normal host execution has no hard-coded Docker dependency.
+
 ## Non-root permissions
 
 The container defaults to numeric UID/GID 1000. Input mounts need read/traverse
@@ -237,15 +252,16 @@ qualification, or full fine-tuning acceptance. Tini forwards termination signals
 to the process group; abrupt termination can still leave stale run metadata,
 as already documented in [usage](usage.md).
 
-## Validation performed for this change
+## Validation status
 
-- Existing host regression suite plus four static Docker checks: **72 passed**.
+- Current host regression suite, including observability and four static Docker
+  checks: **81 passed**.
 - Docker Hub base-image tags/digests verified; matched PyTorch versions checked
   against official installation instructions.
-- No source, training requirements, Conda bootstrap, or package schema changed.
-- Docker is unavailable on the current Windows host. No image build, container
-  training/inference, or GPU execution is claimed as completed. Execute the
-  commands above on a Docker-enabled target before claiming deployment acceptance.
+- Docker is unavailable on the current Windows development host. Separately, the
+  CUDA Docker workflow has completed a real LoRA training run on an NVIDIA H100.
+  That run does not qualify every image revision, driver, model, dataset, precision,
+  or full-fine-tuning combination.
 
 The original [Project #1 acceptance](acceptance_report.md) remains valid for its
 recorded Windows/CPU workflow. Docker qualification is a separate release gate.

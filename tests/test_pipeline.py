@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -234,15 +235,17 @@ class DatasetPipelineTests(unittest.TestCase):
         root = self.temporary_project_dir()
         log_file = root / "logs" / "train.log"
 
-        def write_process_output(_command, **kwargs):
-            kwargs["stdout"].write("llamafactory output\n")
-            kwargs["stdout"].flush()
-            return type("Result", (), {"returncode": 0})()
+        process = type(
+            "Process",
+            (),
+            {"stdout": StringIO("llamafactory output\n"), "wait": lambda self: 0},
+        )()
 
-        with patch("fine_tuning_pipeline.trainer.subprocess.run", side_effect=write_process_output) as runner:
+        with patch("fine_tuning_pipeline.trainer.subprocess.Popen", return_value=process) as runner:
             run_training("train.yaml", log_file=log_file)
 
         self.assertEqual(runner.call_args.kwargs["stderr"], subprocess.STDOUT)
+        self.assertEqual(runner.call_args.kwargs["stdout"], subprocess.PIPE)
         self.assertIn("Launching command:", log_file.read_text(encoding="utf-8"))
         self.assertIn("llamafactory output", log_file.read_text(encoding="utf-8"))
 

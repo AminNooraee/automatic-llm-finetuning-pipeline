@@ -21,6 +21,10 @@ class ModelCompatibility:
     detection_source: str
     warnings: tuple[str, ...] = ()
     config_model_type: str | None = None
+    requested_revision: str | None = None
+    resolved_revision: str | None = None
+    revision_status: str = "unavailable"
+    revision_unavailable_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ _SUPPORTED_TEMPLATES = {
 
 
 @lru_cache(maxsize=32)
-def _load_huggingface_config(model_name: str) -> Any:
+def _load_huggingface_config(model_name: str, revision: str | None = None) -> Any:
     try:
         from transformers import AutoConfig
     except ImportError as error:
@@ -48,14 +52,16 @@ def _load_huggingface_config(model_name: str) -> Any:
             "Model inspection requires the 'transformers' package used by "
             "LLaMA-Factory. Install the project training dependencies first."
         ) from error
-    return AutoConfig.from_pretrained(model_name)
+    kwargs = {"revision": revision} if revision is not None else {}
+    return AutoConfig.from_pretrained(model_name, **kwargs)
 
 
 def resolve_model_compatibility(
     model_name: str,
     *,
     requested_template: str | None = None,
-    config_loader: Callable[[str], Any] | None = None,
+    requested_revision: str | None = None,
+    config_loader: Callable[..., Any] | None = None,
 ) -> ModelCompatibility:
     """Detect a supported model family and resolve its training template."""
     if not isinstance(model_name, str) or not model_name.strip():
@@ -69,8 +75,17 @@ def resolve_model_compatibility(
     config_loaded = False
     loader = config_loader or _load_huggingface_config
 
+    if requested_revision is not None:
+        if not isinstance(requested_revision, str) or not requested_revision.strip():
+            raise ModelCompatibilityError("model.revision must be a non-empty string")
+        requested_revision = requested_revision.strip()
+
+    model_config: Any = None
     try:
-        model_config = loader(model_name)
+        if requested_revision is None:
+            model_config = loader(model_name)
+        else:
+            model_config = loader(model_name, revision=requested_revision)
         config_loaded = True
         config_model_type = _config_value(model_config, "model_type")
         config_match = _detect_from_config(model_config, model_name)
@@ -159,6 +174,18 @@ def resolve_model_compatibility(
             "SFT is allowed, but confirm that a base checkpoint is intentional."
         )
 
+    resolved_revision = _config_value(model_config, "_commit_hash") if config_loaded else None
+    if resolved_revision is not None:
+        resolved_revision = str(resolved_revision)
+        revision_status = "resolved"
+        revision_reason = None
+    elif config_error is not None:
+        revision_status = "unavailable"
+        revision_reason = f"Hugging Face config/revision lookup failed: {_short_error(config_error)}"
+    else:
+        revision_status = "unavailable"
+        revision_reason = "Loaded model config did not expose a resolved Hub commit hash"
+
     return ModelCompatibility(
         model_name=model_name,
         family=selected.family,
@@ -167,6 +194,10 @@ def resolve_model_compatibility(
         detection_source=detection_source,
         warnings=tuple(dict.fromkeys(warnings)),
         config_model_type=config_model_type,
+        requested_revision=requested_revision,
+        resolved_revision=resolved_revision,
+        revision_status=revision_status,
+        revision_unavailable_reason=revision_reason,
     )
 
 

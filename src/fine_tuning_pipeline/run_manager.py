@@ -37,6 +37,7 @@ class RunPaths:
     training_yaml: Path
     train_log: Path
     metadata: Path
+    environment: Path
 
 
 class RunManager:
@@ -97,8 +98,10 @@ class RunManager:
             training_yaml=config_dir / "training.yaml",
             train_log=logs_dir / "train.log",
             metadata=run_root / "metadata.json",
+            environment=run_root / "environment.json",
         )
         metadata = {
+            "schema_version": 2,
             "run_id": run_id,
             "status": "created",
             "created_at": _iso_utc(timestamp),
@@ -177,11 +180,27 @@ class RunManager:
         with self.paths.resolved_config.open("w", encoding="utf-8") as file:
             yaml.safe_dump(dict(config), file, sort_keys=False)
 
-    def record_model(self, *, name: str, family: str, template: str) -> None:
+    def record_model(
+        self,
+        *,
+        name: str,
+        family: str,
+        template: str,
+        requested_revision: str | None = None,
+        resolved_revision: str | None = None,
+        revision_status: str = "unavailable",
+        revision_unavailable_reason: str | None = None,
+    ) -> None:
         self._metadata["model"] = {
             "name": name,
+            "identifier": name,
             "family": family,
             "template": template,
+            "resolved_template": template,
+            "requested_revision": requested_revision,
+            "resolved_revision": resolved_revision,
+            "revision_status": revision_status,
+            "revision_unavailable_reason": revision_unavailable_reason,
         }
         self._write_metadata()
 
@@ -194,6 +213,8 @@ class RunManager:
         dataset_format: str,
         num_samples: int,
         snapshot: Path,
+        normalized_path: Path | None = None,
+        sha256: str | None = None,
     ) -> None:
         self._metadata["dataset"] = {
             "path": source,
@@ -202,7 +223,81 @@ class RunManager:
             "format": dataset_format,
             "num_samples": num_samples,
             "snapshot": snapshot.relative_to(self.paths.root).as_posix(),
+            "normalized_path": (
+                normalized_path.relative_to(self.paths.root).as_posix()
+                if normalized_path is not None
+                else None
+            ),
+            "sha256": sha256,
         }
+        self._write_metadata()
+
+    def record_environment(self, environment: Mapping[str, Any]) -> None:
+        value = dict(environment)
+        with self.paths.environment.open("w", encoding="utf-8") as file:
+            json.dump(value, file, indent=2, ensure_ascii=False)
+        self._metadata["environment"] = value
+        self._metadata["environment_artifact"] = self.paths.environment.relative_to(
+            self.paths.root
+        ).as_posix()
+        self._write_metadata()
+
+    def record_observability(
+        self,
+        *,
+        container: Mapping[str, Any],
+        resources: Mapping[str, Any],
+    ) -> None:
+        self._metadata["container"] = dict(container)
+        self._metadata["resources"] = dict(resources)
+        self._write_metadata()
+
+    def record_artifact_relationship(
+        self,
+        *,
+        method: str,
+        base_model: str,
+        requested_base_revision: str | None,
+        base_revision: str | None,
+        template: str,
+    ) -> None:
+        is_lora = method == "lora"
+        artifact_type = "lora_adapter" if is_lora else "full_model"
+        adapter_path = str(self.paths.model) if is_lora else None
+        self._metadata["artifact"] = {
+            "type": artifact_type,
+            "base_model_identifier": base_model,
+            "requested_base_revision": requested_base_revision,
+            "base_revision": base_revision,
+            "adapter_path": adapter_path,
+            "expected_loading_relationship": (
+                "load base model at base_revision, then attach this PEFT LoRA adapter"
+                if is_lora
+                else "load this full model artifact directly"
+            ),
+            "merged": False if is_lora else None,
+            "merged_model_path": None,
+        }
+        self._metadata["serving"] = {
+            "provider_neutral": True,
+            "base_model_identifier": base_model,
+            "requested_base_revision": requested_base_revision,
+            "base_revision": base_revision,
+            "adapter_path": adapter_path,
+            "artifact_type": artifact_type,
+            "template": template,
+            "suggested_served_model_id": f"{self.run_id}-{artifact_type.replace('_', '-')}",
+            "endpoint_configured": False,
+        }
+        self._write_metadata()
+
+    def record_training_metrics(self, metrics: Mapping[str, Any]) -> None:
+        self._metadata["training_metrics"] = dict(metrics)
+        self._write_metadata()
+
+    def record_training_duration(self, seconds: float | None) -> None:
+        resources = self._metadata.setdefault("resources", {})
+        resources["training_wall_clock_seconds"] = seconds
         self._write_metadata()
 
     def record_training(self, training: Mapping[str, Any]) -> None:

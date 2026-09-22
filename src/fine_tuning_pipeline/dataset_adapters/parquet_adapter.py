@@ -57,7 +57,13 @@ class ParquetAdapter(BaseDatasetAdapter):
                 "Install it only when Parquet support is needed."
             ) from error
         try:
-            return parquet.read_table(path).to_pylist()
+            # Passing an owned stream avoids a lingering Windows file handle from
+            # the dataset API's internal Parquet source discovery/cache.
+            with path.open("rb") as stream:
+                table = parquet.read_table(stream)
+                rows = table.to_pylist()
+            del table
+            return rows
         except Exception as error:
             raise DatasetValidationError(
                 f"Unable to read Parquet dataset {path}: {error}"

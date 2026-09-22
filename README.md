@@ -9,9 +9,9 @@ configs. The project's original code is licensed under [Apache License 2.0](LICE
 
 Release version: `v1.0.0`. See [release notes](RELEASE_NOTES.md),
 [changelog](CHANGELOG.md), [publishing checklist](RELEASE_CHECKLIST.md), and
-[readiness audit](docs/release_readiness.md). Source publication is authorized;
-Docker execution and clean-target installation remain unverified. See the
-documented limitations before deployment.
+[readiness audit](docs/release_readiness.md). The CUDA Docker workflow has since
+completed a real LoRA run on an NVIDIA H100; this does not qualify every image,
+driver, model, dataset, or full-fine-tuning combination.
 
 ## Overview
 
@@ -58,6 +58,11 @@ logging, and metadata span the whole execution. See [architecture](docs/architec
 - Validated, configuration-driven training and LoRA parameters.
 - Unique run directories with input/resolved/training configuration snapshots.
 - Persistent pipeline/training logs and metadata tracking.
+- Versioned experiment metadata with exact normalized-dataset SHA-256 hashes,
+  best-effort Hub revisions, environment/container provenance, resource context,
+  and normalized final Trainer metrics.
+- Live LLaMA-Factory stdout/stderr in the terminal while retaining the complete
+  `logs/train.log` file.
 - Artifact validation before a run is declared successful.
 - Post-training adapter loading and inference validated during acceptance;
   inference is not an automatic extra step of every training execution.
@@ -168,8 +173,8 @@ are required. Do not put Hub tokens in build arguments or image files.
 See [Docker deployment](docs/docker.md) for PowerShell commands, UID/GID settings,
 GPU checks, named configs, credentials, and deployment acceptance. Base images
 and the core stack are pinned, not every OS/transitive package. Docker is not
-installed on the current validation host: image builds, container training, and
-GPU/H100 execution remain unvalidated.
+installed on this Windows development host, but the CUDA Docker workflow has
+subsequently completed a real LoRA training run on an NVIDIA H100.
 
 ## Usage
 
@@ -188,6 +193,8 @@ Example configuration:
 ```yaml
 model:
   name: Qwen/Qwen2.5-0.5B-Instruct
+  # Optional Hub branch, tag, or commit; resolved commit is recorded when available.
+  # revision: main
 dataset:
   path: ../examples/datasets/alpaca_demo.json
   name: demo_dataset
@@ -218,8 +225,17 @@ in [usage](docs/usage.md). Do not copy a named config into a different folder
 without adjusting its relative paths.
 
 Each execution saves `runs/<run_id>/config/`, `dataset/`, `logs/`, `model/`, and
-`metadata.json`. Success requires both process completion and expected nonempty
-artifacts. Use the recorded model output directory rather than legacy `models/`.
+`metadata.json`, plus `environment.json`. Metadata schema v2 preserves the
+original fields and adds revision resolution, the SHA-256 of the exact normalized
+dataset consumed by training, package/GPU/container context, wall-clock duration,
+final Trainer metrics, and an explicit base-model/adapter relationship. Success
+still requires both process completion and expected nonempty artifacts.
+
+LoRA output is recorded as `lora_adapter`, not a standalone model. The
+provider-neutral `serving` block identifies the base, adapter, template, and a
+suggested unique ID for a future integration. This change does **not** implement
+endpoint serving, vLLM launch, LiteLLM registration, adapter merging, or Project
+#2 integration.
 
 ## Validated results
 
@@ -232,20 +248,22 @@ artifacts. Use the recorded model output directory rather than legacy `models/`.
 | Run isolation, logging, metadata, and LoRA artifact verification | PASS |
 | Original acceptance regression suite | 64 passed |
 | Post-relocation regression suite | 68 passed (64 original + 4 layout checks) |
-| Current suite with Docker deployment contract tests | 72 passed; host/static scope, not a container build |
+| Current suite, including observability and Docker contract tests | 81 passed; host/static scope |
 
 Validation ran on Windows with CPU-only PyTorch. See the portable
 [acceptance report](docs/acceptance_report.md) for evidence, exact scope, and limitations.
 
 ## Limitations
 
-- GPU/H100 production deployment has not been tested.
-- Dockerfiles are provided; actual image build/container acceptance is pending.
+- Runtime metadata reports visible GPU/container facts but does not qualify every
+  driver, CUDA, image, or orchestrator combination.
 - Full fine-tuning has configuration/unit coverage but no real full-method run.
 - QLoRA is not implemented; DPO training is also intentionally unsupported.
 - Large datasets are materialized in memory; 100k/1M-row scale was not validated.
 - Abrupt power loss can leave stale run status; automatic recovery is not implemented.
 - A LoRA adapter is not a standalone merged model; its base model is required.
+- Child-process CUDA allocator peaks are explicitly unavailable; whole-device
+  shared-GPU usage is never mislabeled as process-specific usage.
 - Minimal training and inference tests prove mechanics, not model quality improvement.
 
 ## Developer documentation

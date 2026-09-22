@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,13 @@ from .dataset_adapter import adapt_dataset_source
 from .dataset_config_generator import generate_dataset_info
 from .dataset_loader import validate_unified_dataset
 from .model_manager import resolve_model_compatibility
+from .observability import (
+    collect_container_provenance,
+    collect_environment,
+    collect_resource_baseline,
+    extract_training_metrics,
+    sha256_file,
+)
 from .run_manager import RunManager
 from .trainer import run_training
 from .training_config import TrainingConfig, resolve_training_config
@@ -100,10 +108,28 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
     with run.logging() as logger:
         logger.info("Created run %s at %s", run.run_id, run.paths.root)
         try:
+            try:
+                environment = collect_environment()
+            except Exception as error:
+                logger.warning("Optional environment collection failed: %s", error)
+                environment = {"collection_error": str(error)}
+            try:
+                container_config = config.get("provenance", {}).get("container", {})
+                container = collect_container_provenance(container_config)
+            except Exception as error:
+                logger.warning("Optional container provenance collection failed: %s", error)
+                container = {"appears_containerized": None, "collection_error": str(error)}
+            run.record_environment(environment)
+            run.record_observability(
+                container=container,
+                resources=collect_resource_baseline(environment),
+            )
+
             logger.info("Resolving model compatibility for %s", configured_model_name)
             model_compatibility = resolve_model_compatibility(
                 configured_model_name,
                 requested_template=config["model"].get("template"),
+                requested_revision=config["model"].get("revision"),
             )
             config["model"]["family"] = model_compatibility.family
             config["model"]["template"] = model_compatibility.template
@@ -111,6 +137,10 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
                 name=configured_model_name,
                 family=model_compatibility.family,
                 template=model_compatibility.template,
+                requested_revision=model_compatibility.requested_revision,
+                resolved_revision=model_compatibility.resolved_revision,
+                revision_status=model_compatibility.revision_status,
+                revision_unavailable_reason=model_compatibility.revision_unavailable_reason,
             )
             logger.info(
                 "Resolved model family=%s variant=%s template=%s source=%s",
@@ -125,6 +155,13 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
             logger.info("Validating training configuration")
             training_config = resolve_training_config(config["training"])
             run.record_training(config["training"])
+            run.record_artifact_relationship(
+                method=training_config.method,
+                base_model=configured_model_name,
+                requested_base_revision=model_compatibility.requested_revision,
+                base_revision=model_compatibility.resolved_revision,
+                template=model_compatibility.template,
+            )
 
             logger.info("Snapshotting dataset source %s", dataset_source)
             snapshot = run.snapshot_dataset(
@@ -146,14 +183,6 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
             config["dataset"]["source_format"] = conversion.source_format
             config["dataset"]["format"] = conversion.dataset_format
             config["dataset"]["snapshot"] = snapshot.relative_to(run.paths.root).as_posix()
-            run.record_dataset(
-                source=resolved_source,
-                name=dataset_name,
-                source_format=conversion.source_format,
-                dataset_format=conversion.dataset_format,
-                num_samples=len(unified_rows),
-                snapshot=snapshot,
-            )
             logger.info(
                 "Prepared %s samples as %s from %s (confidence %.2f)",
                 len(unified_rows),
@@ -165,6 +194,16 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
             normalized_path = run.paths.dataset / "normalized_dataset.json"
             with normalized_path.open("w", encoding="utf-8") as file:
                 json.dump(unified_rows, file, ensure_ascii=False, indent=2)
+            run.record_dataset(
+                source=resolved_source,
+                name=dataset_name,
+                source_format=conversion.source_format,
+                dataset_format=conversion.dataset_format,
+                num_samples=len(unified_rows),
+                snapshot=snapshot,
+                normalized_path=normalized_path,
+                sha256=sha256_file(normalized_path),
+            )
             generate_dataset_info(dataset_name, normalized_path, run.paths.dataset)
 
             config["output"] = {
@@ -228,8 +267,13 @@ def execute_training(config_path=None, runs_root=None):
         run.set_status("training")
         logger.info("Starting LLaMA-Factory training")
 
+    training_started = time.monotonic()
     try:
-        run_training(prepared.yaml_file, log_file=run.paths.train_log)
+        training_result = run_training(prepared.yaml_file, log_file=run.paths.train_log)
+        duration = getattr(training_result, "wall_clock_seconds", None)
+        run.record_training_duration(
+            float(duration) if isinstance(duration, (int, float)) else time.monotonic() - training_started
+        )
         with run.logging() as logger:
             run.set_status("verifying")
             logger.info("Training process exited successfully; verifying model artifacts")
@@ -238,12 +282,20 @@ def execute_training(config_path=None, runs_root=None):
                 prepared.training_config.method,
             )
             run.record_verified_artifacts(artifacts)
+            try:
+                run.record_training_metrics(extract_training_metrics(run.paths.model))
+            except Exception as error:
+                logger.warning("Optional final training metric collection failed: %s", error)
             run.set_status("success")
             logger.info(
                 "Run completed successfully with verified artifacts: %s",
                 ", ".join(path.name for path in artifacts),
             )
     except Exception as error:
+        try:
+            run.record_training_duration(time.monotonic() - training_started)
+        except Exception:
+            pass
         run.mark_failed(error)
         with run.logging() as logger:
             logger.exception("Training run failed: %s", error)

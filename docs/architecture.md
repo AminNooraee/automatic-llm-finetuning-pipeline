@@ -30,15 +30,17 @@ supported by configuration/artifact checks but was not actually trained in accep
 
 1. Load and check the default or explicitly supplied input YAML.
 2. Allocate a unique run directory and snapshot the input config.
-3. Resolve model family/template from model name and HuggingFace config.
+3. Capture best-effort environment/container context and resolve model
+   family/template plus requested/resolved HuggingFace revision.
 4. Validate supported training fields and method-specific settings.
 5. Snapshot the dataset source and load it through the source adapter registry.
 6. Detect/validate its schema, normalize it, and validate SFT-compatible rows.
-7. Write normalized JSON, run-local `dataset_info.json`, resolved input config,
-   and LLaMA-Factory training YAML.
-8. Launch the upstream CLI with this interpreter and absolute YAML path, capturing
-   its stdout/stderr to the run log.
-9. On exit zero, verify expected nonempty model artifacts; only then mark success.
+7. Write normalized JSON, hash its exact bytes with SHA-256, then write run-local
+   `dataset_info.json`, resolved input config, and LLaMA-Factory training YAML.
+8. Launch the upstream CLI with this interpreter and absolute YAML path, streaming
+   stdout/stderr to both the terminal and persistent run log.
+9. On exit zero, verify expected nonempty model artifacts, normalize final metrics
+   from Trainer JSON artifacts, and only then mark success.
 10. On handled errors, mark failure, preserve the error log, and raise the error.
     Print a final run summary for training completion/failure.
 
@@ -67,6 +69,7 @@ the runtime flow or the LLaMA-Factory artifact contract.
 | `trainer.py` | Upstream subprocess launch and combined training log capture |
 | `run_manager.py` | Unique paths, snapshots, metadata persistence, logging |
 | `artifact_validator.py` | Expected nonempty artifact checks for LoRA/full |
+| `observability.py` | Dataset digest, environment/container/resource capture, final metric extraction |
 
 ## Adapter stages
 
@@ -91,6 +94,7 @@ runs/<UTC timestamp>_<model>_<dataset>[_collision suffix]/
   dataset/dataset_info.json
   logs/train.log
   model/
+  environment.json
   metadata.json
 ```
 
@@ -98,6 +102,17 @@ Local datasets are copied with their source extension. Hub input gets an
 `original_dataset.json` source/options descriptor, not a full raw dataset export.
 LLaMA-Factory receives the run's dataset and model directories as absolute paths.
 Collision-safe allocation never overwrites a previous run.
+
+`metadata.json` uses additive schema version 2. Existing lifecycle, model,
+dataset, training, and output fields remain. New blocks record reproducible
+inputs, environment/container context, conservative resource measurements,
+normalized final metrics, and the base-model/adapter relationship.
+`trainer_state.json` stays authoritative for per-step `log_history`; metadata
+links to it instead of duplicating a potentially large history.
+
+The provider-neutral serving handoff is planning data only. Endpoint serving,
+vLLM launch, LiteLLM registration, model merging, and Project #2 integration are
+outside this phase.
 
 LoRA validation requires nonempty `adapter_config.json` and
 `adapter_model.safetensors`. Full-method checks require nonempty `config.json`

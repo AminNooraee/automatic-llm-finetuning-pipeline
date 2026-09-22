@@ -41,6 +41,9 @@ def build_llamafactory_config(
         "template": resolved_template,
         "output_dir": str(output_dir),
     }
+    requested_revision = config["model"].get("revision")
+    if requested_revision is not None:
+        llama_config["model_revision"] = requested_revision
     llama_config.update(resolved_training.to_llamafactory_args())
     # LLaMA-Factory's model loader owns checkpointing and enables it by default.
     # The generic Trainer flag alone does not disable that loader behavior.
