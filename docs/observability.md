@@ -26,8 +26,10 @@ observability:
   or failure, final status, and important errors. Backend progress and INFO noise
   stay out of the terminal.
 - `concise` is the default. It additionally recognizes training setup, throttled
-  tqdm progress, metric dictionaries, final metric tables, warnings, errors, and
-  tracebacks. Its matching is model-family-neutral.
+  Trainer progress and per-step metric dictionaries, plus warnings, errors, and
+  tracebacks. Preprocessing/loading progress and the backend's final metrics table
+  stay hidden; the structured completion summary reports those final metrics once.
+  Its matching is model-family-neutral.
 - `full` reproduces the unfiltered live backend stream while still writing it to
   the log.
 

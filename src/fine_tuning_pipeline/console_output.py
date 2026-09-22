@@ -19,11 +19,7 @@ _TRAINING_DETAIL_RE = re.compile(
     r"(?:Num examples|Num Epochs|Total optimization steps)\s*=",
     re.IGNORECASE,
 )
-_FINAL_METRIC_RE = re.compile(
-    r"(?:epoch|train_loss|train_runtime|train_samples_per_second|"
-    r"train_steps_per_second)\s*=",
-    re.IGNORECASE,
-)
+_TRAINING_COMPLETE_RE = re.compile(r"\bTraining completed\b", re.IGNORECASE)
 _METRIC_KEYS = {
     "loss",
     "grad_norm",
@@ -74,6 +70,9 @@ class ConsoleOutputFormatter:
         self._current_step: int | None = None
         self._total_steps: int | None = None
         self._last_progress_step = 0
+        self._last_progress_signature: tuple[int, int] | None = None
+        self._in_training_phase = False
+        self._in_final_metrics_table = False
 
     def feed(self, text: str) -> None:
         if not text:
@@ -100,6 +99,7 @@ class ConsoleOutputFormatter:
         if self._buffer:
             self._handle_record(self._buffer, carriage_return=False)
             self._buffer = ""
+        self._in_training_phase = False
 
     def _handle_record(self, record: str, *, carriage_return: bool) -> None:
         line = _strip_ansi(record).strip()
@@ -121,10 +121,39 @@ class ConsoleOutputFormatter:
             self._emit(line)
             return
 
-        progress = _PROGRESS_RE.search(line) if ("%" in line or "it/s" in line) else None
+        if "***** Running training *****" in line:
+            self._in_training_phase = True
+            self._in_final_metrics_table = False
+            self._current_step = None
+            self._total_steps = None
+            self._last_progress_step = 0
+            self._last_progress_signature = None
+            self._emit(line)
+            return
+
+        if "***** train metrics *****" in line:
+            self._leave_training_phase(final_metrics_table=True)
+            return
+
+        if _TRAINING_COMPLETE_RE.search(line):
+            self._leave_training_phase()
+            return
+
+        if self._in_final_metrics_table:
+            return
+
+        progress = (
+            _PROGRESS_RE.search(line)
+            if self._in_training_phase and ("%" in line or "it/s" in line)
+            else None
+        )
         if progress:
             self._current_step = int(progress.group("current"))
             self._total_steps = int(progress.group("total"))
+            signature = (self._current_step, self._total_steps)
+            if signature == self._last_progress_signature:
+                return
+            self._last_progress_signature = signature
             threshold = max(1, self._total_steps // 20)
             if (
                 self._current_step == self._total_steps
@@ -138,17 +167,18 @@ class ConsoleOutputFormatter:
             return
 
         metrics = _parse_metric_mapping(line)
-        if metrics:
+        if metrics and self._in_training_phase and "loss" in metrics:
             self._emit(_format_metrics(metrics, self._current_step, self._total_steps))
             return
 
-        if (
-            "***** Running training *****" in line
-            or "***** train metrics *****" in line
-            or _TRAINING_DETAIL_RE.search(line)
-            or _FINAL_METRIC_RE.search(line)
-        ):
+        if self._in_training_phase and _TRAINING_DETAIL_RE.search(line):
             self._emit(line)
+
+    def _leave_training_phase(self, *, final_metrics_table: bool = False) -> None:
+        self._in_training_phase = False
+        self._in_final_metrics_table = final_metrics_table
+        self._current_step = None
+        self._total_steps = None
 
     def _emit(self, text: str) -> None:
         self.stream.write(text + "\n")

@@ -25,16 +25,29 @@ TESTS_DIR = Path(__file__).resolve().parent
 RAW_OUTPUT = (
     "loading configuration file config.json from cache...\n"
     "Qwen2Config {\n  hidden_config: true\n}\n"
+    "Converting format of dataset: 100%|##########| 2/2 [00:00, 20.0it/s]\r"
+    "Running tokenizer on dataset: 100%|##########| 2/2 [00:00, 10.0it/s]\r"
+    "Loading weights: 42%|####      | 123/290 [00:01<00:01, 80.0it/s]\r"
+    "Loading weights: 100%|##########| 290/290 [00:02<00:00, 90.0it/s]\r"
     "***** Running training *****\n"
     "Num examples = 1200\n"
     "Num Epochs = 3\n"
-    " 50%|#####     | 75/150 [02:21<02:19, 1.86s/it]\r"
+    " 50%|#####     | 1/2 [02:21<02:19, 1.86s/it]\r"
     "{'loss': '1.234', 'grad_norm': '0.91', "
     "'learning_rate': '0.0001', 'epoch': '0.5'}\n"
+    "100%|##########| 2/2 [04:42<00:00, 1.86s/it]\r"
+    "100%|##########| 2/2 [04:42<00:00, 1.86s/it]\r"
+    "{'loss': '0.9', 'grad_norm': '0.7', "
+    "'learning_rate': '0.0', 'epoch': '1.0'}\n"
     "WARNING important backend warning\n"
     "input_ids: [1, 2, 3, 4]\n"
     "{'train_runtime': '288.1', 'train_loss': '0.75', "
     "'train_samples_per_second': '4.16', 'train_steps_per_second': '0.52'}\n"
+    "***** train metrics *****\n"
+    "  epoch                    =        1.0\n"
+    "  train_loss               =       0.75\n"
+    "  train_runtime            = 0:04:48.10\n"
+    "Training completed successfully\n"
 )
 
 
@@ -77,29 +90,54 @@ class ConsoleOutputFormatterTests(unittest.TestCase):
         for expected in (
             "Running training",
             "Num examples = 1200",
-            "Step 75/150",
+            "Progress: 1/2 (50%)",
+            "Progress: 2/2 (100%)",
+            "Step 1/2",
+            "Step 2/2",
             "Epoch 0.5",
             "Loss 1.234",
             "GradNorm 0.91",
             "LR 0.0001",
-            "Train loss 0.75",
-            "Runtime 288.1s",
             "WARNING important backend warning",
         ):
             self.assertIn(expected, output)
-        for hidden in ("loading configuration", "Qwen2Config", "hidden_config", "input_ids"):
+        for hidden in (
+            "loading configuration",
+            "Qwen2Config",
+            "hidden_config",
+            "input_ids",
+            "Converting format of dataset",
+            "Running tokenizer on dataset",
+            "Loading weights",
+            "123/290",
+        ):
+            self.assertNotIn(hidden, output)
+        self.assertEqual(output.count("Progress: 2/2 (100%)"), 1)
+
+    def test_concise_hides_backend_final_metrics_and_completion_table(self):
+        output = self.render("concise")
+        for hidden in (
+            "train_runtime",
+            "Train loss 0.75",
+            "Runtime 288.1s",
+            "***** train metrics *****",
+            "train_loss",
+            "Training completed successfully",
+        ):
             self.assertNotIn(hidden, output)
 
     def test_full_is_exactly_the_raw_stream(self):
         self.assertEqual(self.render("full"), RAW_OUTPUT)
 
     def test_carriage_return_progress_is_throttled(self):
-        raw = "".join(
+        raw = "***** Running training *****\n" + "".join(
             f" {step}%|bar| {step}/100 [00:01<00:01, 2.0it/s]\r"
             for step in range(1, 101)
         )
         output = self.render("concise", raw)
-        progress_lines = output.splitlines()
+        progress_lines = [
+            line for line in output.splitlines() if line.startswith("Progress:")
+        ]
         self.assertLessEqual(len(progress_lines), 21)
         self.assertIn("Progress: 100/100 (100%)", output)
 
@@ -204,6 +242,41 @@ class TrainerConsoleModeTests(unittest.TestCase):
         self.assertNotIn("LLaMA-Factory config created", output)
         metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
         self.assertEqual(metadata["status"], "success")
+
+    def test_concise_pipeline_shows_one_structured_final_metrics_summary(self):
+        root = self.temporary_dir()
+        config = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+        config["dataset"]["path"] = str(
+            DEFAULT_CONFIG_PATH.parent.parent / "examples" / "datasets" / "alpaca_demo.json"
+        )
+        config["observability"] = {"console_verbosity": "concise"}
+        config_path = root / "config.yaml"
+        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+        def create_adapter(yaml_file, **_kwargs):
+            arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
+            model_dir = Path(arguments["output_dir"])
+            (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
+            (model_dir / "train_results.json").write_text(
+                json.dumps({"train_loss": 0.75, "train_runtime": 4.0}),
+                encoding="utf-8",
+            )
+
+        terminal = io.StringIO()
+        with patch(
+            "fine_tuning_pipeline.model_manager._load_huggingface_config",
+            return_value={"model_type": "qwen2"},
+        ), patch(
+            "fine_tuning_pipeline.train_pipeline.run_training",
+            side_effect=create_adapter,
+        ), redirect_stdout(terminal):
+            execute_training(config_path, runs_root=root / "runs")
+
+        output = terminal.getvalue()
+        self.assertEqual(output.count("=== Training Complete ==="), 1)
+        self.assertEqual(output.count("Train loss: 0.75"), 1)
+        self.assertEqual(output.count("Runtime: 4.0 s"), 1)
 
 
 if __name__ == "__main__":

@@ -129,7 +129,11 @@ class LiveTrainerTests(unittest.TestCase):
         terminal = StringIO()
         with patch(
             "fine_tuning_pipeline.trainer.subprocess.Popen",
-            return_value=self._process("{'loss': 1.2, 'epoch': 1.0}\n", 0),
+            return_value=self._process(
+                "***** Running training *****\n"
+                "{'loss': 1.2, 'epoch': 1.0}\n",
+                0,
+            ),
         ):
             with redirect_stdout(terminal):
                 result = run_training("training.yaml", log_file=log)
