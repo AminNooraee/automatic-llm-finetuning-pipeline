@@ -75,16 +75,21 @@ runs/<run_id>/
   dataset/dataset_info.json
   logs/train.log
   model/
+  environment.json
   metadata.json
 ```
 
 Hub snapshots are source/options descriptors. The normalized selected records
-are persisted. LoRA's model directory contains adapter configuration/weights and
-saved tokenizer files; retain the matching base model identifier/revision for reuse.
+are persisted. Metadata schema v2 records revision/dataset/environment/container/
+metric provenance and the output relationship. LoRA's model directory contains
+adapter configuration/weights and saved tokenizer files; retain the matching
+base model identifier/revision because the adapter is not standalone.
+The provider-neutral serving block is handoff metadata only; it does not create
+an endpoint or launch a serving runtime.
 
 ## Understand completion and failure
 
-Check `metadata.json`, `logs/train.log`, and the model directory together.
+Check `metadata.json`, `environment.json`, `logs/train.log`, and the model directory together.
 `success` means the process exited zero and required nonempty artifacts passed
 validation; it does not mean quality benchmarking passed. Missing artifacts or
 handled preparation/training errors mark failure and raise an error to the caller.
@@ -94,6 +99,12 @@ For abrupt shutdown, first inspect metadata, process state, log tail, and any
 checkpoints before deciding how to recover. Automatic power-loss recovery is not
 implemented; do not assume a stale `training` status is proof of an active job.
 Never delete prior runs to force a retry.
+
+Terminal output defaults to concise Trainer-phase progress and per-step metrics.
+Select `quiet`, `concise`, or `full` with
+`observability.console_verbosity`. This only changes presentation:
+`logs/train.log` retains pipeline lifecycle records and the complete unfiltered
+backend stdout/stderr stream. See [console observability](observability.md).
 
 ## Cached/offline CPU execution
 

@@ -2,6 +2,32 @@
 
 Validation date: September 16, 2026
 
+## Post-acceptance update - 2026-09-22
+
+This section supplements the historical Windows/CPU acceptance below. It does
+not retroactively change that environment, its results, or its test counts.
+
+Additional current-main evidence now includes:
+
+- the canonical CUDA Docker image built successfully;
+- the current regression suite passed 94 tests during the accepted build;
+- a real one-epoch `Qwen/Qwen2.5-0.5B-Instruct` LoRA run completed successfully
+  with BF16 on one visible NVIDIA H100 and a tiny synthetic dataset;
+- required adapter artifacts were verified;
+- quiet/concise/full console observability was validated, including concise
+  Trainer progress/metric filtering and complete backend output retention;
+- metadata schema v2, requested/resolved model revision, normalized-dataset
+  SHA-256, environment/package/GPU/container provenance, and final Trainer
+  metrics were captured and validated; and
+- `logs/train.log` preserved pipeline lifecycle records plus the complete
+  unfiltered backend stdout/stderr stream.
+
+The accepted H100 run was
+`20260922_075253_qwen2-5-0-5b-instruct_smoke-demo`. This evidence is narrow:
+it does not qualify every GPU, driver, CUDA version, model family, precision,
+dataset size, full fine-tuning, or production serving. See
+[current main status](current_status.md) for the authoritative current scope.
+
 Conclusion: PASS for the supported supervised fine-tuning/LoRA workflow.
 Project #1 is ready to supply validated outputs to Project #2 (Benchmark Pipeline).
 Original code is licensed under [Apache License 2.0](../LICENSE). Clean-target
@@ -12,10 +38,11 @@ training run or universal certification of all HuggingFace models/hardware.
 Raw logs, private machine paths, weights, and runtime evidence remain local and
 are intentionally excluded from publication.
 
-Docker support was added after this acceptance: the existing host suite plus
-four static Docker contract tests passes 72 tests. CPU/CUDA base image digests
+Historical post-relocation note: Docker support was added after this acceptance;
+at that point the existing host suite plus
+four static Docker contract tests passed 72 tests. CPU/CUDA base image digests
 were verified, but no Docker executable/daemon is available on this host.
-Image-build, container training/inference, and GPU acceptance remain pending;
+Image-build, container training/inference, and GPU acceptance were then pending;
 see [Docker deployment](docker.md). These checks do not replace the original
 real training/inference evidence or claim fresh server reproduction.
 
@@ -175,9 +202,11 @@ preparation, without changing this functional acceptance evidence.
 
 ### Additional qualification / future improvements
 
-- GPU/H100/BF16/FP16 and real larger-family/full-method training validation.
+- Broader GPU/driver/CUDA qualification, FP16, and real
+  larger-family/full-method training validation. BF16 has only the narrow H100
+  Docker LoRA smoke evidence described above.
 - Complete target-specific dependency locks and retrievable wheel/source provenance.
-- Model/dataset revision tracking and licensing/privacy review for real inputs.
+- Licensing/privacy review for real model and dataset inputs.
 - Large-dataset stress testing; current materialization is not bounded-memory streaming.
 - Automated power-loss status reconciliation/resumption; stale statuses are possible.
 - Stronger full-model shard/integrity checks; existence/size checks are not full verification.

@@ -38,8 +38,10 @@ a substitute for checking upstream checkpoint/model-card compatibility and terms
 ## Validation scope
 
 Qwen2.5-0.5B-Instruct was really trained on CPU with LoRA and successfully loaded
-for adapter inference. Qwen, Llama 2, Llama 3, Mistral, and Gemma tokenizers encoded
-user/assistant examples through their resolved LLaMA-Factory templates.
+for adapter inference. It was later trained successfully with LoRA/BF16 in the
+CUDA Docker workflow on one H100. Qwen, Llama 2, Llama 3, Mistral, and Gemma
+tokenizers encoded user/assistant examples through their resolved LLaMA-Factory
+templates.
 
 Llama 2/3, Mistral, and Gemma generated training YAML parsed with the backend,
 and incompatible `qwen` overrides were rejected. Official gated Meta/Google
@@ -48,6 +50,7 @@ mirrors supplied real configs/tokenizers for the remaining smoke checks.
 
 No large-model weights were downloaded for these smoke tests. Gemma 2/3 mapping
 is implemented but those generations were not independently training-qualified.
+No non-Qwen family has equivalent H100 weight-level training acceptance.
 The inspected backend emitted a Llama 3 new-token/resize warning during tokenizer
 testing; weight-level vocabulary-resize behavior was not validated for that family.
 

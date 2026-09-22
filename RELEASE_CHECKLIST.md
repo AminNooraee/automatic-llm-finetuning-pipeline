@@ -1,5 +1,11 @@
 # v1.0.0 release checklist
 
+> **Historical v1.0.0 publication checklist.** Checked and unchecked items below
+> record the state at that release; they are not rewritten by later validation.
+> Current `main` has post-release improvements and narrow Docker/H100 evidence.
+> See [current main status](docs/current_status.md) and the
+> [changelog](CHANGELOG.md).
+
 Prepared September 16, 2026. Status: **source publication authorized; preparing
 GitHub publication**. Docker and clean-target deployment qualification remain pending.
 Completed checks refer to this source tree/host, not a public tag or clean server.

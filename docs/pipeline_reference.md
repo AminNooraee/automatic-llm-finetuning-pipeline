@@ -226,9 +226,9 @@ presentation is independently selected with `observability.console_verbosity`:
 progress/loss/learning-rate/grad-norm fields live whenever the upstream trainer
 emits them and suppresses low-value backend INFO/configuration dumps.
 
-`logs/train.log` is always the authoritative complete raw backend log regardless
-of console mode. Carriage-return progress is retained in the file; concise mode
-normalizes and throttles it for the terminal.
+`logs/train.log` contains pipeline lifecycle records plus the complete unfiltered
+backend stdout/stderr stream regardless of console mode. Carriage-return progress
+is retained in the file; concise mode normalizes and throttles it for the terminal.
 
 Final values are normalized from `train_results.json`, `all_results.json`, and
 `trainer_state.json`; training loss is not labeled as accuracy. Per-step history

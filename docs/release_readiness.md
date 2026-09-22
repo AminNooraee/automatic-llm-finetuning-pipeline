@@ -4,6 +4,25 @@ Target version: **v1.0.0** (package metadata `1.0.0`)
 
 Audit date: September 16, 2026
 
+> **Historical v1.0.0 readiness audit.** The body and its 71-file/72-test
+> evidence describe the pre-release state on the audit date. They are retained
+> rather than rewritten as current-main evidence. See the addendum below,
+> [current main status](current_status.md), and the [changelog](../CHANGELOG.md).
+
+## Current-main addendum - 2026-09-22
+
+- The current regression suite passes 94 tests.
+- The CUDA Docker image built successfully.
+- A narrow H100 acceptance run succeeded with Qwen2.5-0.5B-Instruct, LoRA, BF16,
+  one visible H100, a tiny synthetic dataset, and one epoch.
+- The current source tree includes `observability.py`, `console_output.py`,
+  `test_observability.py`, `test_console_output.py`, and
+  `docs/observability.md`; these intentionally do not appear in the historical
+  71-file staged listing below.
+- Clean-target host installation remains a separate qualification gate.
+- Universal GPU/model/driver/CUDA qualification, FP16, cross-family H100
+  training, and real full fine-tuning are still not claimed.
+
 Decision: **source publication authorized; GitHub preparation in progress**.
 Functional SFT/LoRA acceptance, source publication, and deployment qualification
 are different scopes. The owner selected Apache-2.0 and requested a release commit,

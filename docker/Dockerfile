@@ -73,7 +73,8 @@ RUN if ! getent group "${APP_GID}" >/dev/null; then \
 
 USER ${APP_UID}:${APP_GID}
 
-# Mocked lifecycle/schema tests only; no training, Hub downloads or GPU required.
+# Regression/unit/static contract tests only; no real training, Hub model download,
+# or GPU required during image build.
 RUN python -m unittest discover -s tests -v
 
 # Forward stop signals to the entire Python/training subprocess group.

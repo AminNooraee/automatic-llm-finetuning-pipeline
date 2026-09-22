@@ -1,5 +1,9 @@
 # Release notes: v1.0.0
 
+> **Historical v1.0.0 release snapshot.** The `main` branch contains newer
+> unreleased improvements and additional Docker/H100 validation. See the
+> [changelog](CHANGELOG.md) and [current main status](docs/current_status.md).
+
 Preparation date: September 16, 2026
 
 Status: **source release authorized; deployment qualification remains incomplete**.

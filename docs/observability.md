@@ -3,13 +3,13 @@
 The training subprocess has two independent output consumers:
 
 ```text
-LLaMA-Factory stdout + stderr
-          |
-          +----> logs/train.log (complete raw stream)
-          |
-          +----> streaming console formatter
-                       |
-                 quiet / concise / full
+Pipeline lifecycle logger ---------+
+                                   +--> logs/train.log
+LLaMA-Factory stdout/stderr --------+    (combined log; complete backend stream)
+                |
+                +--> streaming console formatter
+                             |
+                       quiet / concise / full
 ```
 
 Configure the formatter in the input YAML. Existing configurations without this
@@ -61,10 +61,11 @@ are displayed. Training loss is never presented as accuracy. Per-step
 
 ## Authoritative logging and limitations
 
-`logs/train.log` always contains the complete combined raw stdout/stderr stream,
-including INFO lines, model/configuration dumps, training examples, and progress
-updates hidden from the terminal. Raw carriage returns and newlines are retained
-where UTF-8 decoding permits.
+`logs/train.log` contains pipeline lifecycle records plus the complete unfiltered
+LLaMA-Factory/Transformers stdout/stderr stream, including INFO lines,
+model/configuration dumps, training examples, and progress updates hidden from
+the terminal. The backend stream itself is never console-filtered. Raw carriage
+returns and newlines are retained where UTF-8 decoding permits.
 
 Concise parsing follows common Transformers/LLaMA-Factory text formats rather
 than a stable machine-readable event protocol. Unknown future formats remain in

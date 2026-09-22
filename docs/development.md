@@ -23,7 +23,9 @@ python -m unittest discover -s tests -p "test_dataset_schema_adapters.py" -v
 ```
 
 The original acceptance suite had 64 tests; relocation added four layout checks.
-The current suite has 72 tests, including four static Docker deployment checks.
+The current suite has 94 tests, including static Docker deployment checks,
+metadata/provenance coverage in `test_observability.py`, and console-mode coverage
+in `test_console_output.py`.
 Mocked failures deliberately exercise failed
 metadata/logging paths; error messages in their transcript do not by themselves
 indicate a failed suite. Read its final result and exit code.

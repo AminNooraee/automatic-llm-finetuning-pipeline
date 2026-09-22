@@ -32,8 +32,8 @@ def run_training(yaml_file, log_file=None, console_verbosity="concise"):
     else:
         log_path = Path(log_file).resolve()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        # newline="" avoids Windows newline translation so backend carriage
-        # returns/newlines remain faithful in the authoritative raw log.
+        # newline="" avoids Windows newline translation so the backend portion
+        # of the combined lifecycle/training log preserves carriage returns.
         with log_path.open("a", encoding="utf-8", newline="") as stream:
             launch_line = f"Launching command: {' '.join(command)}\n"
             stream.write(launch_line)

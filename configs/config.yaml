@@ -31,5 +31,5 @@ output:
   runs_path: ../runs
 
 observability:
-  # quiet: lifecycle only; concise: lifecycle and metrics; full: all backend output
+  # quiet: lifecycle only; concise: Trainer progress/metrics; full: all backend output
   console_verbosity: concise

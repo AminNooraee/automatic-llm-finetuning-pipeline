@@ -4,6 +4,10 @@ The approved source/test organization is complete. Files were moved individually
 no runtime directory, environment, cache, generated output, or temporary folder
 was moved. Import and path references were updated without changing training logic.
 
+The relocation counts below are historical. Current `main` has 94 tests and later
+observability/provenance modules plus narrow Docker/H100 validation. See
+[current main status](current_status.md).
+
 ## Published source layout
 
 ```text
@@ -20,6 +24,7 @@ automatic-llm-finetuning-pipeline/
   environment.yml             Optional Python/pip bootstrap
   docs/
     architecture.md
+    current_status.md
     installation.md
     usage.md
     configuration.md
@@ -29,6 +34,7 @@ automatic-llm-finetuning-pipeline/
     development.md
     repository_structure.md
     pipeline_reference.md
+    observability.md
     docker.md
     release_readiness.md
   docker/
@@ -47,7 +53,9 @@ automatic-llm-finetuning-pipeline/
       dataset_config_generator.py
       dataset_loader.py
       model_manager.py
+      observability.py
       run_manager.py
+      console_output.py
       trainer.py
       training_config.py
       train_pipeline.py
@@ -60,6 +68,8 @@ automatic-llm-finetuning-pipeline/
     test_dataset_source_adapters.py
     test_docker_support.py
     test_model_manager.py
+    test_observability.py
+    test_console_output.py
     test_pipeline.py
     test_repository_layout.py
     test_run_management.py
@@ -73,8 +83,9 @@ automatic-llm-finetuning-pipeline/
 ```
 
 The workspace folder does not need renaming to publish under this project name.
-Root `.dockerignore` and `docker/` now provide container build support; actual
-image-build/container/GPU qualification is pending. See [Docker deployment](docker.md).
+Root `.dockerignore` and `docker/` provide container build support. The CUDA image
+and one narrow H100 BF16 LoRA smoke are validated; universal container/GPU/model
+qualification is not claimed. See [Docker deployment](docker.md).
 
 ## Moved files
 
@@ -132,7 +143,7 @@ Dataset paths and `output.runs_path` keep their config-relative semantics.
 All provided YAML files place outputs in the checkout's `runs/`. Model output
 and dataset registration remain absolute run-specific paths for LLaMA-Factory.
 
-## Relocation validation
+## Historical relocation validation
 
 - Full regression suite: 68 tests passed (64 original + 4 relocation checks).
 - All 28 package submodules import; installed imports/default config work from
@@ -162,7 +173,8 @@ past paths. Cached or generated files left in the legacy directory remain ignore
    files already committed elsewhere.
 3. Reproduce the pinned training environment on the chosen clean release target,
    lock transitive dependencies/binaries, and repeat minimal training/inference.
-4. Build and qualify the provided CPU/CUDA Docker variants on a Docker-enabled
-   target; H100/GPU and real container training/inference remain untested.
+4. Reproduce the image on other clean targets and qualify the CPU variant and
+   broader GPU/model/driver combinations. One CUDA/H100 BF16 LoRA smoke is
+   complete, but universal GPU or full-fine-tuning qualification is not claimed.
 5. Editable source-checkout usage is supported; standalone wheel distribution
    with bundled default configs/examples is not claimed by this organization pass.

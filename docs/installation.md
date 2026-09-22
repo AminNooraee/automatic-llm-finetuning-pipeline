@@ -12,8 +12,9 @@ been executed in this pass. Do not replace the validated environment without ver
 - Git and access to the package/Hub/upstream repositories for first installation.
 - Enough RAM/disk for the chosen model, packages, normalized data, and runs.
 - For gated models/datasets, approved access and credentials supplied outside Git.
-- A separately validated PyTorch/driver combination for GPU execution. H100/GPU
-  operation has not been tested in Project #1 acceptance.
+- A separately validated PyTorch/driver combination for GPU execution. One
+  Qwen2.5-0.5B LoRA/BF16 smoke run succeeded in the CUDA Docker workflow on an
+  H100; this is not general H100/GPU or host-native installation qualification.
 
 ## Virtual environment
 
@@ -125,8 +126,8 @@ With the environment active:
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 72 tests (64 original, four relocation checks, and
-four static Docker checks).
+The current suite contains 94 tests. Historical 64/68/72-test milestones remain
+recorded in the release and relocation documents.
 Windows sandbox policies can block test
 temporary directories/cache locks even when the source is readable. A permission
 failure is not a reason to change adapters/training logic; use a permitted test
@@ -141,17 +142,20 @@ weights or replace authorization for gated repositories. See [usage](usage.md).
 Before publishing a reproducible release, confirm the pinned upstream revision and
 package wheels are retrievable from the release environment, solve/lock its full
 dependency set, run `pip check` and regression tests, and repeat the minimal training
-and inference acceptance on that target. No complete fresh training-environment install, dependency upgrade, container
-build, or GPU deployment was performed here. Editable installation was verified
-in the existing environment. See [layout/release gates](repository_structure.md).
+and inference acceptance on that target. The CUDA Docker image and one narrow H100
+BF16 LoRA smoke run have been validated; a complete clean host-native installation
+has not. Editable installation was verified in the existing historical environment.
+See [current status](current_status.md) and
+[layout/release gates](repository_structure.md).
 
 ## Distribution scope
 
-[Docker deployment](docker.md) now provides CPU and selectable CUDA images using
+[Docker deployment](docker.md) provides CPU and selectable CUDA images using
 the same editable source checkout. Build with
 `docker build -f docker/Dockerfile -t automatic-llm-finetuner .` from the root.
-No Docker daemon is available on the current validation host, so this is provided
-support, not a claim of completed image-build/training acceptance.
+The CUDA image has built and completed the documented narrow H100 smoke. This
+does not qualify the CPU image, host-native GPU installation, FP16, other model
+families, or arbitrary driver/CUDA combinations.
 
 This pass supports editable installation from a source checkout. Default configs
 and synthetic examples remain in that checkout, outside the Python package.

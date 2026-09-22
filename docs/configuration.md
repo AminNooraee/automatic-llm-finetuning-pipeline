@@ -128,8 +128,9 @@ fields today; do not add them to YAML and expect upstream pass-through.
 
 `fp32` disables the upstream mixed-precision flags; it does not guarantee frozen
 base weights are reloaded in float32. The backend may retain the model config's
-weight dtype for LoRA. GPU/BF16/FP16 capability is a host/backend constraint and
-has not been acceptance-qualified here.
+weight dtype for LoRA. BF16 was validated in one narrow Qwen2.5-0.5B H100 Docker
+LoRA smoke run. FP16 has not been separately accepted, and broader
+model/hardware combinations remain host/backend-dependent.
 
 ## Output
 
@@ -162,5 +163,6 @@ Unknown observability keys and invalid values fail before a run directory is
 allocated. This is a bounded wrapper setting, not an unrestricted backend
 pass-through, and it does not change training arguments or hyperparameters.
 
-In every mode, `logs/train.log` is the authoritative complete raw backend log.
-Console filtering never removes content from that file.
+In every mode, `logs/train.log` contains pipeline lifecycle records plus the
+complete unfiltered backend stdout/stderr stream. Console filtering never removes
+backend content from that file.

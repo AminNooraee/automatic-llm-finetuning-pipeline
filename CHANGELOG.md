@@ -5,8 +5,26 @@ invented historical Git release sequence. Dates below are preparation dates.
 
 ## Unreleased
 
-- Complete clean-target installation and Docker build/runtime acceptance before
-  claiming deployment qualification.
+- Added metadata schema v2 with requested/resolved model revision, normalized
+  dataset SHA-256, environment/package/GPU snapshots, container provenance,
+  training duration, normalized final Trainer metrics, and explicit
+  base-model/adapter relationships.
+- Added provider-neutral future serving handoff metadata. Endpoint serving, vLLM,
+  LiteLLM, adapter merging, and Project #2 integration remain unimplemented.
+- Retained the full unfiltered backend stdout/stderr stream in `logs/train.log`
+  alongside pipeline lifecycle logging.
+- Added `quiet`, default `concise`, and `full` console modes, including
+  Trainer-phase progress filtering, final-progress deduplication, and compact
+  per-step metrics.
+- Added deterministic Parquet handle cleanup.
+- Built the CUDA Docker image and completed a narrow real H100 BF16 LoRA smoke
+  validation with Qwen2.5-0.5B-Instruct.
+- Expanded the current regression suite to 94 passing tests.
+- Added an authoritative [current-main status page](docs/current_status.md).
+
+Clean-target installation and broader GPU/model/method qualification remain
+separate gates. These changes are post-v1.0.0 and are not retroactively part of
+the tagged release.
 
 ## v1.0.0 — 2026-09-16
 

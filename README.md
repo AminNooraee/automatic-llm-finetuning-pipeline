@@ -7,11 +7,11 @@ Project #1 is functionally validated for the supported SFT/LoRA workflow. This
 repository uses an editable `src/` package, root tests, and documented example
 configs. The project's original code is licensed under [Apache License 2.0](LICENSE).
 
-Release version: `v1.0.0`. See [release notes](RELEASE_NOTES.md),
-[changelog](CHANGELOG.md), [publishing checklist](RELEASE_CHECKLIST.md), and
-[readiness audit](docs/release_readiness.md). The CUDA Docker workflow has since
-completed a real LoRA run on an NVIDIA H100; this does not qualify every image,
-driver, model, dataset, or full-fine-tuning combination.
+Latest tagged release: `v1.0.0`. Current `main` contains unreleased post-v1.0.0
+improvements. See [current main status](docs/current_status.md),
+[release notes](RELEASE_NOTES.md), [changelog](CHANGELOG.md),
+[publishing checklist](RELEASE_CHECKLIST.md), and
+[readiness audit](docs/release_readiness.md).
 
 ## Overview
 
@@ -61,8 +61,8 @@ logging, and metadata span the whole execution. See [architecture](docs/architec
 - Versioned experiment metadata with exact normalized-dataset SHA-256 hashes,
   best-effort Hub revisions, environment/container provenance, resource context,
   and normalized final Trainer metrics.
-- Live LLaMA-Factory stdout/stderr in the terminal while retaining the complete
-  `logs/train.log` file.
+- Quiet, default concise, and full console modes while retaining the complete
+  unfiltered backend stream in `logs/train.log`.
 - Artifact validation before a run is declared successful.
 - Post-training adapter loading and inference validated during acceptance;
   inference is not an automatic extra step of every training execution.
@@ -121,9 +121,9 @@ python -m pip check
 
 The manifest pins the tested application stack and upstream source revision.
 PyTorch selection is host-specific; transitive packages are not fully locked.
-Fresh-environment and Docker/GPU reproduction have not been validated in this
-relocation pass. The existing validated `venv/` received only the editable
-application package; its training dependencies were not changed.
+Clean host-native installation remains a separate qualification gate. A narrow
+CUDA Docker/H100 BF16 LoRA smoke run has succeeded; it does not establish general
+GPU, driver, CUDA, model, precision, or full-fine-tuning compatibility.
 See [installation](docs/installation.md) for the recorded CPU versions, optional
 adapter-only dependencies, Conda bootstrap, and installation caveats.
 
@@ -172,9 +172,10 @@ are required. Do not put Hub tokens in build arguments or image files.
 
 See [Docker deployment](docs/docker.md) for PowerShell commands, UID/GID settings,
 GPU checks, named configs, credentials, and deployment acceptance. Base images
-and the core stack are pinned, not every OS/transitive package. Docker is not
-installed on this Windows development host, but the CUDA Docker workflow has
-subsequently completed a real LoRA training run on an NVIDIA H100.
+and the core stack are pinned, not every OS/transitive package. The historical
+Windows acceptance host had no Docker daemon. The later CUDA Docker workflow
+completed a real LoRA training run on one NVIDIA H100; see the
+[current status](docs/current_status.md) for its exact scope.
 
 ## Usage
 
@@ -242,9 +243,9 @@ observability:
   console_verbosity: quiet  # quiet | concise | full
 ```
 
-This affects terminal presentation only. `logs/train.log` always remains the
-authoritative complete raw LLaMA-Factory/Transformers stdout and stderr log,
-including output hidden from `quiet` and `concise`. See
+This affects terminal presentation only. `logs/train.log` contains pipeline
+lifecycle records plus the complete unfiltered LLaMA-Factory/Transformers stdout
+and stderr stream, including output hidden from `quiet` and `concise`. See
 [console observability](docs/observability.md).
 
 LoRA output is recorded as `lora_adapter`, not a standalone model. The
@@ -264,10 +265,14 @@ endpoint serving, vLLM launch, LiteLLM registration, adapter merging, or Project
 | Run isolation, logging, metadata, and LoRA artifact verification | PASS |
 | Original acceptance regression suite | 64 passed |
 | Post-relocation regression suite | 68 passed (64 original + 4 layout checks) |
-| Current suite, including console observability and Docker contract tests | 92 passed; host/static scope |
+| Current suite, including console observability and Docker contract tests | 94 passed |
+| CUDA Docker build | PASS |
+| H100 Docker smoke | PASS: Qwen2.5-0.5B-Instruct, LoRA, BF16, one visible H100, tiny synthetic dataset, one epoch |
 
-Validation ran on Windows with CPU-only PyTorch. See the portable
-[acceptance report](docs/acceptance_report.md) for evidence, exact scope, and limitations.
+The original acceptance ran on Windows with CPU-only PyTorch. Later Docker/H100
+evidence supplements rather than rewrites that history. See the
+[current status](docs/current_status.md) and portable
+[acceptance report](docs/acceptance_report.md) for scope and limitations.
 
 ## Limitations
 
@@ -281,6 +286,9 @@ Validation ran on Windows with CPU-only PyTorch. See the portable
 - Child-process CUDA allocator peaks are explicitly unavailable; whole-device
   shared-GPU usage is never mislabeled as process-specific usage.
 - Minimal training and inference tests prove mechanics, not model quality improvement.
+- The accepted H100 smoke does not qualify all models, GPUs, drivers, CUDA
+  versions, FP16, full fine-tuning, larger models, large datasets, or production
+  serving.
 
 ## Developer documentation
 
@@ -300,8 +308,8 @@ With the environment active, run the existing regression suite:
 python -m unittest discover -s tests -v
 ```
 
-The approved relocation changes import/path references, not training logic.
-Release preparation does not change the trainer or qualify container deployment.
+Current documentation distinguishes the historical v1.0.0/relocation evidence
+from later unreleased validation. See [current main status](docs/current_status.md).
 
 ## License
 

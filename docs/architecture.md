@@ -48,6 +48,9 @@ supported by configuration/artifact checks but was not actually trained in accep
 Model/config validation failures happen before dataset preparation/training but
 can still leave a run directory, input snapshot, metadata, and error log.
 Malformed input rejected before run allocation does not have run-scoped metadata.
+The same `logs/train.log` also receives pipeline lifecycle logger records, so it
+is a combined lifecycle log containing the complete unfiltered backend stream,
+not a backend-only file.
 
 ## Module responsibilities
 
