@@ -2,7 +2,7 @@
 
 Status date: **2026-09-22**
 
-Tested commit: `d0875235fff2b6df11a0965a5d5fe8c5da281696`
+Last runtime/H100 acceptance commit: `d0875235fff2b6df11a0965a5d5fe8c5da281696`
 
 Latest tagged release: **v1.0.0**. The `main` branch contains unreleased
 post-v1.0.0 improvements summarized here and in the [changelog](../CHANGELOG.md).
@@ -61,3 +61,4 @@ the backend stream written to that file.
 - A complete clean-target installation remains a separate qualification gate.
   The Docker CUDA build/run evidence does not establish host-native clean-install
   reproduction, universal GPU qualification, or standalone-wheel distribution.
+
