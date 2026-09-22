@@ -134,7 +134,7 @@ class LiveTrainerTests(unittest.TestCase):
             with redirect_stdout(terminal):
                 result = run_training("training.yaml", log_file=log)
         self.assertEqual(result.returncode, 0)
-        self.assertIn("'loss': 1.2", terminal.getvalue())
+        self.assertIn("Epoch 1 | Loss 1.2", terminal.getvalue())
         self.assertIn("'loss': 1.2", log.read_text(encoding="utf-8"))
 
     def test_failed_output_is_preserved_before_exit_error(self):

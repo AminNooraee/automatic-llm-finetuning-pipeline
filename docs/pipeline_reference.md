@@ -220,9 +220,15 @@ is also stored in `environment.json`. A run is marked `success` only after train
 and its expected artifacts have been verified. LoRA runs require
 `adapter_config.json` and `adapter_model.safetensors`; full fine-tuning requires
 `config.json` plus non-empty model weight files. Pipeline messages and combined
-LLaMA-Factory stdout/stderr are streamed live to the terminal and saved to
-`logs/train.log`, including progress/loss/learning-rate/grad-norm fields whenever
-the upstream trainer emits them.
+LLaMA-Factory stdout/stderr are always saved to `logs/train.log`. Terminal
+presentation is independently selected with `observability.console_verbosity`:
+`quiet`, default `concise`, or unfiltered `full`. Concise mode streams recognized
+progress/loss/learning-rate/grad-norm fields live whenever the upstream trainer
+emits them and suppresses low-value backend INFO/configuration dumps.
+
+`logs/train.log` is always the authoritative complete raw backend log regardless
+of console mode. Carriage-return progress is retained in the file; concise mode
+normalizes and throttles it for the terminal.
 
 Final values are normalized from `train_results.json`, `all_results.json`, and
 `trainer_state.json`; training loss is not labeled as accuracy. Per-step history

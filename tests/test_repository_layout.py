@@ -26,7 +26,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         modules = list(pkgutil.walk_packages(
             fine_tuning_pipeline.__path__, fine_tuning_pipeline.__name__ + "."
         ))
-        self.assertEqual(len(modules), 29)
+        self.assertEqual(len(modules), 30)
         for module in modules:
             with self.subTest(module=module.name):
                 imported = importlib.import_module(module.name)

@@ -58,6 +58,7 @@ def generate_training_yaml(
     output_dir=None,
     output_file=None,
     training_config=None,
+    announce=True,
 ):
     """Write a validated LLaMA-Factory training configuration."""
     if output_file is None:
@@ -76,7 +77,8 @@ def generate_training_yaml(
     with output_file.open("w", encoding="utf-8") as file:
         yaml.safe_dump(llama_config, file, sort_keys=False)
 
-    print(f"LLaMA-Factory config created: {output_file}")
+    if announce:
+        print(f"LLaMA-Factory config created: {output_file}")
     return str(output_file)
 
 
@@ -86,6 +88,7 @@ def generate_lora_yaml(
     output_dir=None,
     output_file=None,
     training_config=None,
+    announce=True,
 ):
     """Backward-compatible alias for callers using the original function name."""
     return generate_training_yaml(
@@ -94,4 +97,5 @@ def generate_lora_yaml(
         output_dir=output_dir,
         output_file=output_file,
         training_config=training_config,
+        announce=announce,
     )

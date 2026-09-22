@@ -216,6 +216,8 @@ training:
     dropout: 0.0
 output:
   runs_path: ../runs
+observability:
+  console_verbosity: concise
 ```
 
 Dataset/output paths are relative to the YAML file, not the shell's working
@@ -230,6 +232,20 @@ original fields and adds revision resolution, the SHA-256 of the exact normalize
 dataset consumed by training, package/GPU/container context, wall-clock duration,
 final Trainer metrics, and an explicit base-model/adapter relationship. Success
 still requires both process completion and expected nonempty artifacts.
+
+Console output defaults to `concise`: lifecycle events, throttled progress,
+emitted training metrics, warnings, errors, and final metrics. Use `quiet` for
+lifecycle and errors only, or `full` for the complete unfiltered backend stream:
+
+```yaml
+observability:
+  console_verbosity: quiet  # quiet | concise | full
+```
+
+This affects terminal presentation only. `logs/train.log` always remains the
+authoritative complete raw LLaMA-Factory/Transformers stdout and stderr log,
+including output hidden from `quiet` and `concise`. See
+[console observability](docs/observability.md).
 
 LoRA output is recorded as `lora_adapter`, not a standalone model. The
 provider-neutral `serving` block identifies the base, adapter, template, and a
@@ -248,7 +264,7 @@ endpoint serving, vLLM launch, LiteLLM registration, adapter merging, or Project
 | Run isolation, logging, metadata, and LoRA artifact verification | PASS |
 | Original acceptance regression suite | 64 passed |
 | Post-relocation regression suite | 68 passed (64 original + 4 layout checks) |
-| Current suite, including observability and Docker contract tests | 81 passed; host/static scope |
+| Current suite, including console observability and Docker contract tests | 92 passed; host/static scope |
 
 Validation ran on Windows with CPU-only PyTorch. See the portable
 [acceptance report](docs/acceptance_report.md) for evidence, exact scope, and limitations.

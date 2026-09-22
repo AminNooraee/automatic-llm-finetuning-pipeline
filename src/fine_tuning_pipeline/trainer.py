@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .console_output import ConsoleOutputFormatter
+
 
 @dataclass(frozen=True)
 class TrainingProcessResult:
@@ -12,7 +14,7 @@ class TrainingProcessResult:
     wall_clock_seconds: float
 
 
-def run_training(yaml_file, log_file=None):
+def run_training(yaml_file, log_file=None, console_verbosity="concise"):
 
     print("Starting LLaMA-Factory training...")
 
@@ -30,7 +32,9 @@ def run_training(yaml_file, log_file=None):
     else:
         log_path = Path(log_file).resolve()
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a", encoding="utf-8") as stream:
+        # newline="" avoids Windows newline translation so backend carriage
+        # returns/newlines remain faithful in the authoritative raw log.
+        with log_path.open("a", encoding="utf-8", newline="") as stream:
             launch_line = f"Launching command: {' '.join(command)}\n"
             stream.write(launch_line)
             stream.flush()
@@ -40,6 +44,7 @@ def run_training(yaml_file, log_file=None):
                 stderr=subprocess.STDOUT,
                 bufsize=0,
             )
+            formatter = ConsoleOutputFormatter(console_verbosity)
             if process.stdout is not None:
                 # Raw chunks preserve tqdm-style carriage-return progress; line
                 # iteration can hide progress until a newline or process exit.
@@ -49,16 +54,15 @@ def run_training(yaml_file, log_file=None):
                     if not raw:
                         break
                     chunk = raw if isinstance(raw, str) else decoder.decode(raw)
-                    sys.stdout.write(chunk)
-                    sys.stdout.flush()
                     stream.write(chunk)
                     stream.flush()
+                    formatter.feed(chunk)
                 tail = decoder.decode(b"", final=True)
                 if tail:
-                    sys.stdout.write(tail)
-                    sys.stdout.flush()
                     stream.write(tail)
                     stream.flush()
+                    formatter.feed(tail)
+            formatter.close()
             returncode = process.wait()
             result = TrainingProcessResult(
                 returncode=returncode,

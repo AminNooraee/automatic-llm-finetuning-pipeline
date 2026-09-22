@@ -43,10 +43,17 @@ class RunPaths:
 class RunManager:
     """Own all files and lifecycle state for one independent training run."""
 
-    def __init__(self, run_id: str, paths: RunPaths, metadata: dict[str, Any]):
+    def __init__(
+        self,
+        run_id: str,
+        paths: RunPaths,
+        metadata: dict[str, Any],
+        console_verbosity: str = "concise",
+    ):
         self.run_id = run_id
         self.paths = paths
         self._metadata = metadata
+        self.console_verbosity = console_verbosity
 
     @classmethod
     def create(
@@ -57,6 +64,7 @@ class RunManager:
         dataset_name: str,
         input_config_path: str | Path,
         created_at: datetime | None = None,
+        console_verbosity: str = "concise",
     ) -> "RunManager":
         timestamp = created_at or datetime.now(timezone.utc)
         timestamp = timestamp.astimezone(timezone.utc)
@@ -110,7 +118,7 @@ class RunManager:
             "training": {},
             "output": {"model_dir": str(model_dir)},
         }
-        manager = cls(run_id, paths, metadata)
+        manager = cls(run_id, paths, metadata, console_verbosity)
         manager._write_metadata()
         try:
             shutil.copy2(Path(input_config_path).resolve(), paths.input_config)
@@ -135,6 +143,8 @@ class RunManager:
         )
         file_handler = logging.FileHandler(self.paths.train_log, encoding="utf-8")
         stream_handler = logging.StreamHandler(sys.stdout)
+        if self.console_verbosity == "quiet":
+            stream_handler.addFilter(_QuietConsoleFilter())
         file_handler.setFormatter(formatter)
         stream_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
@@ -330,3 +340,18 @@ class RunManager:
         with temporary.open("w", encoding="utf-8") as file:
             json.dump(self._metadata, file, indent=2, ensure_ascii=False)
         temporary.replace(self.paths.metadata)
+
+
+class _QuietConsoleFilter(logging.Filter):
+    _LIFECYCLE_PREFIXES = (
+        "Created run ",
+        "Starting LLaMA-Factory training",
+        "Run completed successfully",
+        "Run preparation failed",
+        "Training run failed",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= logging.WARNING or record.getMessage().startswith(
+            self._LIFECYCLE_PREFIXES
+        )

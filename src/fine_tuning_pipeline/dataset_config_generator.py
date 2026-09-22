@@ -6,7 +6,8 @@ from pathlib import Path
 def generate_dataset_info(
         name,
         file_path,
-        registry_dir
+        registry_dir,
+        announce=True,
 ):
 
     dataset_path = Path(file_path).resolve()
@@ -37,5 +38,6 @@ def generate_dataset_info(
         )
 
 
-    print("dataset_info.json generated")
+    if announce:
+        print("dataset_info.json generated")
     return output_path

@@ -254,8 +254,8 @@ as already documented in [usage](usage.md).
 
 ## Validation status
 
-- Current host regression suite, including observability and four static Docker
-  checks: **81 passed**.
+- Current host regression suite, including console observability and four static
+  Docker checks: **92 passed**.
 - Docker Hub base-image tags/digests verified; matched PyTorch versions checked
   against official installation instructions.
 - Docker is unavailable on the current Windows development host. Separately, the

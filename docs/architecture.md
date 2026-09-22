@@ -37,8 +37,9 @@ supported by configuration/artifact checks but was not actually trained in accep
 6. Detect/validate its schema, normalize it, and validate SFT-compatible rows.
 7. Write normalized JSON, hash its exact bytes with SHA-256, then write run-local
    `dataset_info.json`, resolved input config, and LLaMA-Factory training YAML.
-8. Launch the upstream CLI with this interpreter and absolute YAML path, streaming
-   stdout/stderr to both the terminal and persistent run log.
+8. Launch the upstream CLI with this interpreter and absolute YAML path. Write
+   every raw stdout/stderr chunk to the persistent run log, then independently
+   filter/format the same live stream for quiet, concise, or full console output.
 9. On exit zero, verify expected nonempty model artifacts, normalize final metrics
    from Trainer JSON artifacts, and only then mark success.
 10. On handled errors, mark failure, preserve the error log, and raise the error.
@@ -70,6 +71,7 @@ the runtime flow or the LLaMA-Factory artifact contract.
 | `run_manager.py` | Unique paths, snapshots, metadata persistence, logging |
 | `artifact_validator.py` | Expected nonempty artifact checks for LoRA/full |
 | `observability.py` | Dataset digest, environment/container/resource capture, final metric extraction |
+| `console_output.py` | Streaming quiet/concise/full backend-console presentation |
 
 ## Adapter stages
 

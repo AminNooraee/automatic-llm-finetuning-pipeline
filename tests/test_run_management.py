@@ -118,7 +118,7 @@ class RunPipelineLifecycleTests(unittest.TestCase):
     def test_successful_run_writes_metadata_and_verifies_model(self):
         root = self.temporary_project_dir()
 
-        def create_adapter(yaml_file, log_file=None):
+        def create_adapter(yaml_file, log_file=None, **_kwargs):
             arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
             model_dir = Path(arguments["output_dir"])
             model_dir.mkdir(parents=True, exist_ok=True)

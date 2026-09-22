@@ -29,3 +29,7 @@ training:
 output:
   # Each execution creates a unique timestamped directory under this path.
   runs_path: ../runs
+
+observability:
+  # quiet: lifecycle only; concise: lifecycle and metrics; full: all backend output
+  console_verbosity: concise

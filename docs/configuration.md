@@ -142,3 +142,25 @@ The run root resolves relative to the YAML file. Default fallback is `../runs`.
 The pipeline allocates the unique run ID and model/dataset/config subdirectories;
 do not attempt to force an existing run as the output model directory through
 unrecognized input keys. Absolute run paths are stored in the resolved config.
+
+## Observability console
+
+```yaml
+observability:
+  console_verbosity: concise
+```
+
+The section and field are optional; the default is `concise`.
+
+| Value | Terminal behavior |
+| --- | --- |
+| `quiet` | Run lifecycle, compact model/dataset summaries, final status, and important errors |
+| `concise` | Quiet output plus throttled progress, emitted training metrics, warnings, and errors |
+| `full` | Complete unfiltered LLaMA-Factory/Transformers stdout and stderr |
+
+Unknown observability keys and invalid values fail before a run directory is
+allocated. This is a bounded wrapper setting, not an unrestricted backend
+pass-through, and it does not change training arguments or hyperparameters.
+
+In every mode, `logs/train.log` is the authoritative complete raw backend log.
+Console filtering never removes content from that file.
