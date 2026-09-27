@@ -11,7 +11,7 @@ Audit date: September 16, 2026
 
 ## Current-main addendum - 2026-09-22
 
-- The current regression suite passes 94 tests.
+- The current regression suite passes 138 tests with no failures or skips.
 - The CUDA Docker image built successfully.
 - A narrow H100 acceptance run succeeded with Qwen2.5-0.5B-Instruct, LoRA, BF16,
   one visible H100, a tiny synthetic dataset, and one epoch.

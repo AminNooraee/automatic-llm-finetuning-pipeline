@@ -26,7 +26,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         modules = list(pkgutil.walk_packages(
             fine_tuning_pipeline.__path__, fine_tuning_pipeline.__name__ + "."
         ))
-        self.assertEqual(len(modules), 30)
+        self.assertEqual(len(modules), 48)
         for module in modules:
             with self.subTest(module=module.name):
                 imported = importlib.import_module(module.name)
@@ -38,7 +38,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG_PATH, REPOSITORY_ROOT / "configs" / "config.yaml")
         names = (
             "config.yaml", "qwen_example.yaml", "llama_example.yaml",
-            "huggingface_dataset_example.yaml",
+            "huggingface_dataset_example.yaml", "serving_gateway_example.yaml",
         )
         for name in names:
             with self.subTest(config=name):

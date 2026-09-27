@@ -260,8 +260,8 @@ as already documented in [usage](usage.md).
 
 ## Validation status
 
-- Current regression suite, including console observability and four static
-  Docker checks: **94 passed**.
+- Current regression suite, including console observability, serving/gateway
+  mocks, security coverage, and four static Docker checks: **138 passed**.
 - Docker Hub base-image tags/digests were verified and matched PyTorch versions
   were checked against official installation instructions.
 - The canonical CUDA image built successfully. A real acceptance smoke completed
@@ -276,3 +276,24 @@ as already documented in [usage](usage.md).
 The original [Project #1 acceptance](acceptance_report.md) remains valid for its
 recorded Windows/CPU workflow. See [current status](current_status.md) for the
 authoritative combined scope.
+
+## Optional vLLM launch versus the training image
+
+The new serving runtime is a separate vLLM container created through the local
+Docker engine after verified LoRA training. Its launcher checks Docker, port, and
+container-name conflicts and never stops/removes/restarts an existing resource.
+It mounts only the verified current-run model directory read-only and labels the
+new container with the run ID.
+
+The canonical training image does not include a Docker CLI or mount the host
+Docker socket. Therefore its default containerized execution remains train-only.
+Run the pipeline from a trusted host Python environment with local Docker access
+for the initial automatic serving path. Do not expose a production Docker socket
+to an untrusted container. A dedicated, least-privilege containerized launcher is
+not implemented or qualified.
+
+The vLLM image is configurable and defaults to `vllm/vllm-openai:v0.11.0` for
+the initial integration contract. Unlike the training image bases, that public
+example is tag-pinned rather than digest-pinned; operators should approve/pin a
+digest and run the isolated acceptance plan before production use. No real vLLM
+container or LiteLLM gateway was contacted by the normal regression suite.

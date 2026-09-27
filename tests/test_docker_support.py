@@ -59,10 +59,15 @@ class DockerSupportTests(unittest.TestCase):
     def test_build_context_defaults_to_deny_and_reopens_only_project_files(self):
         self.assertEqual(self.ignore_rules[0], "**")
         for rule in ("!requirements.txt", "!pyproject.toml", "!docker/Dockerfile",
-                     "!configs/config.yaml", "!src/fine_tuning_pipeline/*.py", "!tests/*.py"):
+                     "!configs/config.yaml", "!configs/serving_gateway_example.yaml",
+                     "!src/fine_tuning_pipeline/*.py", "!tests/*.py"):
             self.assertIn(rule, self.ignore_rules)
         for directory in ("docker", "src", "src/fine_tuning_pipeline",
-                          "src/fine_tuning_pipeline/dataset_adapters", "configs",
+                          "src/fine_tuning_pipeline/dataset_adapters",
+                          "src/fine_tuning_pipeline/serving",
+                          "src/fine_tuning_pipeline/serving/backends",
+                          "src/fine_tuning_pipeline/gateway",
+                          "src/fine_tuning_pipeline/gateway/providers", "configs",
                           "examples", "examples/datasets", "tests"):
             self.assertIn(directory + "/**", self.ignore_rules)
         for directory in ("runs", "models", "checkpoints", "datasets", "venv", ".venv",

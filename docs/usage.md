@@ -75,6 +75,13 @@ runs/<run_id>/
   dataset/dataset_info.json
   logs/train.log
   model/
+  serving/endpoint_manifest.json  # only when serving is enabled and ready
+  serving/health_check.json
+  serving/serving.log
+  gateway/gateway_manifest.json   # only when gateway is enabled and ready
+  gateway/registration.json
+  gateway/health_check.json
+  gateway/gateway.log
   environment.json
   metadata.json
 ```
@@ -84,15 +91,35 @@ are persisted. Metadata schema v2 records revision/dataset/environment/container
 metric provenance and the output relationship. LoRA's model directory contains
 adapter configuration/weights and saved tokenizer files; retain the matching
 base model identifier/revision because the adapter is not standalone.
-The provider-neutral serving block is handoff metadata only; it does not create
-an endpoint or launch a serving runtime.
+With optional phases enabled, the provider-neutral serving/gateway manifests are
+machine-readable endpoint handoffs. See [serving](serving.md),
+[gateway](gateway.md), and the
+[sanitized complete config](../configs/serving_gateway_example.yaml).
+
+## Optional operational modes
+
+- Train only: omit both optional sections or set each `enabled: false`.
+- Train + vLLM: enable serving. Success requires verified training artifacts,
+  direct discovery of both aliases, and direct inference through both aliases.
+- Train + vLLM + LiteLLM: also enable gateway. Success additionally requires
+  conflict-free registration, gateway discovery, and gateway inference through
+  both aliases.
+
+Gateway cannot be enabled without serving. Automatic serving cannot be enabled
+for full fine-tuning in this initial implementation. Set `LITELLM_BASE_URL` and
+`LITELLM_API_KEY` in the process environment before using the example; do not
+replace the API-key reference with a literal value.
 
 ## Understand completion and failure
 
-Check `metadata.json`, `environment.json`, `logs/train.log`, and the model directory together.
-`success` means the process exited zero and required nonempty artifacts passed
-validation; it does not mean quality benchmarking passed. Missing artifacts or
-handled preparation/training errors mark failure and raise an error to the caller.
+Check `metadata.json`, `environment.json`, logs, manifests, and the model directory
+together. In train-only mode, `success` retains its original meaning: training
+exited zero and required artifacts passed validation. With optional phases,
+top-level `success` also requires every requested endpoint check. Additive phase
+status distinguishes `training: success` plus `serving`/`gateway: failed` and
+verified training artifacts remain intact. None of these states proves model
+quality improvement. Missing artifacts or handled phase errors mark top-level
+failure and raise an error to the caller.
 Input validation errors before run creation have no run-scoped log.
 
 For abrupt shutdown, first inspect metadata, process state, log tail, and any
@@ -128,5 +155,6 @@ in a local credential mechanism/environment, never in configs committed to Git.
 Acceptance proved loading `AutoModelForCausalLM` for the recorded base model,
 `AutoTokenizer` from the run's model directory, and `PeftModel.from_pretrained`
 for its adapter, followed by chat-prompt generation. See [acceptance](acceptance_report.md).
-The pipeline does not automatically run inference after every execution or merge
-the adapter into a standalone model. No serving/evaluation behavior is changed here.
+Train-only execution does not automatically run inference or merge the adapter.
+Enabled serving/gateway phases do perform their minimal endpoint inference checks;
+these establish route mechanics, not quality. Adapter merging is not implemented.

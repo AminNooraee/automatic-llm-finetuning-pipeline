@@ -1,7 +1,8 @@
 # Automatic LLM Fine-tuning Pipeline
 
 Configuration-driven supervised fine-tuning with automatic dataset preparation,
-model/template compatibility, and traceable training runs.
+model/template compatibility, traceable training runs, and optional verified
+OpenAI-compatible serving and gateway handoff.
 
 Project #1 is functionally validated for the supported SFT/LoRA workflow. This
 repository uses an editable `src/` package, root tests, and documented example
@@ -43,7 +44,19 @@ LLaMA-Factory SFT
   |
 LoRA Adapter (or full-method model output)
   |
-Artifact Validation -> metadata success / failure
+Artifact Validation -> verified training artifact / training failure
+  |
+  +-- train-only completion
+  |
+  +-- optional vLLM Docker serving
+        |-- base model alias
+        |-- fine-tuned LoRA alias
+        `-- /v1/models + inference verification
+              |
+              +-- direct endpoint handoff
+              `-- optional existing LiteLLM registration
+                    `-- gateway discovery + inference verification
+                          `-- gateway endpoint handoff
 ```
 
 This is the conceptual data-to-model flow. At runtime model compatibility and
@@ -64,8 +77,15 @@ logging, and metadata span the whole execution. See [architecture](docs/architec
 - Quiet, default concise, and full console modes while retaining the complete
   unfiltered backend stream in `logs/train.log`.
 - Artifact validation before a run is declared successful.
-- Post-training adapter loading and inference validated during acceptance;
-  inference is not an automatic extra step of every training execution.
+- Optional safe vLLM Docker launch for the qualified LoRA path, loading one base
+  model and one static adapter in a single process under separate aliases.
+- Direct `/v1/models` plus real Chat Completions verification for both aliases.
+- Optional dynamic registration with an externally managed LiteLLM gateway,
+  conflict checks, end-to-end inference verification, and provider-neutral handoff.
+- Environment-backed gateway credentials with recursive snapshot/artifact/log/error
+  redaction; resolved credentials are never persisted.
+- Post-training adapter loading and inference validated during historical
+  acceptance; train-only execution still performs no automatic inference.
 
 ## Supported models
 
@@ -221,6 +241,11 @@ observability:
   console_verbosity: concise
 ```
 
+Omit `serving` and `gateway` for the unchanged train-only workflow. For the full
+sanitized operational example, see
+[configs/serving_gateway_example.yaml](configs/serving_gateway_example.yaml),
+[serving](docs/serving.md), and [gateway registration](docs/gateway.md).
+
 Dataset/output paths are relative to the YAML file, not the shell's working
 directory. The CLI reads the default config; it does not implement a `--config`
 option. Named files in [configs/](configs/) use the existing Python API, as shown
@@ -232,7 +257,9 @@ Each execution saves `runs/<run_id>/config/`, `dataset/`, `logs/`, `model/`, and
 original fields and adds revision resolution, the SHA-256 of the exact normalized
 dataset consumed by training, package/GPU/container context, wall-clock duration,
 final Trainer metrics, and an explicit base-model/adapter relationship. Success
-still requires both process completion and expected nonempty artifacts.
+requires both process completion and method-aware artifact validation. LoRA runs
+also require a valid adapter configuration, positive rank, and a base-model
+relationship consistent with the recorded training inputs.
 
 Console output defaults to `concise`: lifecycle events, throttled progress,
 emitted training metrics, warnings, errors, and final metrics. Use `quiet` for
@@ -248,11 +275,12 @@ lifecycle records plus the complete unfiltered LLaMA-Factory/Transformers stdout
 and stderr stream, including output hidden from `quiet` and `concise`. See
 [console observability](docs/observability.md).
 
-LoRA output is recorded as `lora_adapter`, not a standalone model. The
-provider-neutral `serving` block identifies the base, adapter, template, and a
-suggested unique ID for a future integration. This change does **not** implement
-endpoint serving, vLLM launch, LiteLLM registration, adapter merging, or Project
-#2 integration.
+LoRA output is recorded as `lora_adapter`, not a standalone model. When optional
+serving succeeds, `serving/endpoint_manifest.json` is the preferred handoff. When
+optional LiteLLM registration also succeeds, `gateway/gateway_manifest.json`
+becomes preferred. Both contain only an OpenAI-compatible base URL and the base/
+fine-tuned aliases; downstream consumers do not need Docker, vLLM, LoRA-path, or
+LiteLLM routing details. No Project #2 source dependency is introduced.
 
 ## Validated results
 
@@ -265,7 +293,7 @@ endpoint serving, vLLM launch, LiteLLM registration, adapter merging, or Project
 | Run isolation, logging, metadata, and LoRA artifact verification | PASS |
 | Original acceptance regression suite | 64 passed |
 | Post-relocation regression suite | 68 passed (64 original + 4 layout checks) |
-| Current suite, including console observability and Docker contract tests | 94 passed |
+| Current suite, including serving/gateway/security mocks and Docker contracts | 138 passed, 0 failed, 0 skipped |
 | CUDA Docker build | PASS |
 | H100 Docker smoke | PASS: Qwen2.5-0.5B-Instruct, LoRA, BF16, one visible H100, tiny synthetic dataset, one epoch |
 
@@ -289,6 +317,10 @@ evidence supplements rather than rewrites that history. See the
 - The accepted H100 smoke does not qualify all models, GPUs, drivers, CUDA
   versions, FP16, full fine-tuning, larger models, large datasets, or production
   serving.
+- Serving and gateway code is mock-validated but has not yet been runtime-qualified
+  against a real GPU/vLLM v0.11.0/LiteLLM dynamic-database environment.
+- Automatic serving is intentionally rejected for `training.method: full`; only
+  LoRA + vLLM + Docker is implemented in this initial path.
 
 ## Developer documentation
 

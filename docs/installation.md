@@ -126,7 +126,7 @@ With the environment active:
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 94 tests. Historical 64/68/72-test milestones remain
+The current suite contains 138 tests. Historical 64/68/72/94-test milestones remain
 recorded in the release and relocation documents.
 Windows sandbox policies can block test
 temporary directories/cache locks even when the source is readable. A permission

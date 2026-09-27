@@ -218,7 +218,10 @@ class TrainerConsoleModeTests(unittest.TestCase):
         def create_adapter(yaml_file, log_file=None, **kwargs):
             arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
             model_dir = Path(arguments["output_dir"])
-            (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (model_dir / "adapter_config.json").write_text(
+                json.dumps({"r": 8, "base_model_name_or_path": arguments["model_name_or_path"]}),
+                encoding="utf-8",
+            )
             (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
             self.assertEqual(kwargs["console_verbosity"], "quiet")
 
@@ -256,7 +259,10 @@ class TrainerConsoleModeTests(unittest.TestCase):
         def create_adapter(yaml_file, **_kwargs):
             arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
             model_dir = Path(arguments["output_dir"])
-            (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (model_dir / "adapter_config.json").write_text(
+                json.dumps({"r": 8, "base_model_name_or_path": arguments["model_name_or_path"]}),
+                encoding="utf-8",
+            )
             (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
             (model_dir / "train_results.json").write_text(
                 json.dumps({"train_loss": 0.75, "train_runtime": 4.0}),

@@ -5,12 +5,14 @@ from pathlib import Path
 
 import yaml
 
-from .artifact_validator import validate_model_artifacts
+from .artifact_validator import read_lora_adapter_metadata, validate_model_artifacts
 from .console_output import resolve_console_verbosity
 from .dataset_adapter import adapt_dataset_source
 from .dataset_config_generator import generate_dataset_info
 from .dataset_loader import validate_unified_dataset
 from .model_manager import resolve_model_compatibility
+from .gateway.config import GatewayConfig, resolve_gateway_config
+from .gateway.manager import GatewayManager
 from .observability import (
     collect_container_provenance,
     collect_environment,
@@ -21,6 +23,8 @@ from .observability import (
 from .run_manager import RunManager
 from .trainer import run_training
 from .training_config import TrainingConfig, resolve_training_config
+from .serving.config import ServingConfig, resolve_serving_config
+from .serving.manager import ServingManager
 from .yaml_generator import generate_training_yaml
 
 
@@ -36,6 +40,8 @@ class PreparedRun:
     yaml_file: str
     run: RunManager
     console_verbosity: str
+    serving_config: ServingConfig
+    gateway_config: GatewayConfig
 
 
 def load_config(config_path=None):
@@ -166,6 +172,19 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
                 base_revision=model_compatibility.resolved_revision,
                 template=model_compatibility.template,
             )
+            serving_config = resolve_serving_config(
+                config.get("serving"),
+                run_id=run.run_id,
+                base_model=configured_model_name,
+                training_method=training_config.method,
+            )
+            gateway_config = resolve_gateway_config(
+                config.get("gateway"),
+                serving=serving_config,
+                run_id=run.run_id,
+            )
+            if gateway_config.api_key is not None:
+                run.register_secret(gateway_config.api_key.reveal())
 
             logger.info("Snapshotting dataset source %s", dataset_source)
             snapshot = run.snapshot_dataset(
@@ -233,7 +252,13 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
             run.set_status("prepared")
             logger.info("Training preparation completed: %s", yaml_file)
             return PreparedRun(
-                config, training_config, yaml_file, run, console_verbosity
+                config,
+                training_config,
+                yaml_file,
+                run,
+                console_verbosity,
+                serving_config,
+                gateway_config,
             )
         except Exception as error:
             run.mark_failed(error)
@@ -275,6 +300,7 @@ def _print_run_summary(
     *,
     console_verbosity="concise",
     training_metrics=None,
+    failure_phase="training",
 ):
     configured_method = config.get("training", {}).get("method")
     method = configured_method.strip().lower() if isinstance(configured_method, str) else ""
@@ -286,9 +312,20 @@ def _print_run_summary(
         output_label = "training output"
     model_name = config["model"]["name"]
     dataset_path = config["dataset"]["path"]
+    operational_failure = status == "failed" and failure_phase in {"serving", "gateway"}
     if console_verbosity != "full":
-        heading = "Training Complete" if status == "success" else "Training Failed"
+        if status == "success":
+            heading = "Training Complete"
+        elif operational_failure:
+            heading = f"{failure_phase.title()} Failed"
+        else:
+            heading = "Training Failed"
         print(f"\n=== {heading} ===")
+        if operational_failure:
+            if failure_phase == "serving":
+                print("Training succeeded; serving failed.")
+            else:
+                print("Training and serving succeeded; gateway failed.")
         metrics = training_metrics or {}
         labels = (
             ("train_loss", "Train loss"),
@@ -307,14 +344,27 @@ def _print_run_summary(
         print(f"Status: {status.upper()}")
         return
 
-    print("\nTraining completed successfully.\n" if status == "success" else "\nTraining failed.\n")
+    if status == "success":
+        print("\nTraining completed successfully.\n")
+    elif failure_phase == "serving":
+        print("\nTraining succeeded; serving failed.\n")
+    elif failure_phase == "gateway":
+        print("\nTraining and serving succeeded; gateway failed.\n")
+    else:
+        print("\nTraining failed.\n")
     print(f"Run:\n{run.paths.root}\n")
     print(f"Model:\n{model_name} {output_label}\n")
     print(f"Dataset:\n{dataset_path}\n")
     print(f"Status:\n{status.upper()}")
 
 
-def execute_training(config_path=None, runs_root=None):
+def execute_training(
+    config_path=None,
+    runs_root=None,
+    *,
+    serving_manager_factory=ServingManager,
+    gateway_manager_factory=GatewayManager,
+):
     """Prepare, train, verify, and finalize one traceable run."""
     prepared = _prepare_run(config_path, runs_root=runs_root)
     run = prepared.run
@@ -325,6 +375,8 @@ def execute_training(config_path=None, runs_root=None):
     _print_training_header(prepared)
 
     training_started = time.monotonic()
+    training_duration_recorded = False
+    current_phase = "training"
     try:
         training_result = run_training(
             prepared.yaml_file,
@@ -335,12 +387,18 @@ def execute_training(config_path=None, runs_root=None):
         run.record_training_duration(
             float(duration) if isinstance(duration, (int, float)) else time.monotonic() - training_started
         )
+        training_duration_recorded = True
         with run.logging() as logger:
             run.set_status("verifying")
             logger.info("Training process exited successfully; verifying model artifacts")
             artifacts = validate_model_artifacts(
                 run.paths.model,
                 prepared.training_config.method,
+                expected_base_model=prepared.config["model"]["name"],
+                expected_base_revisions=(
+                    run.metadata["model"].get("requested_revision"),
+                    run.metadata["model"].get("resolved_revision"),
+                ),
             )
             run.record_verified_artifacts(artifacts)
             metrics = {}
@@ -349,24 +407,120 @@ def execute_training(config_path=None, runs_root=None):
                 run.record_training_metrics(metrics)
             except Exception as error:
                 logger.warning("Optional final training metric collection failed: %s", error)
-            run.set_status("success")
             logger.info(
-                "Run completed successfully with verified artifacts: %s",
+                "Training completed successfully with verified artifacts: %s",
                 ", ".join(path.name for path in artifacts),
             )
+
+        if prepared.serving_config.enabled:
+            adapter_metadata = read_lora_adapter_metadata(
+                run.paths.model,
+                expected_base_model=prepared.config["model"]["name"],
+                expected_base_revisions=(
+                    run.metadata["model"].get("requested_revision"),
+                    run.metadata["model"].get("resolved_revision"),
+                ),
+            )
+            run.record_phase_status("training", "success")
+            current_phase = "serving"
+            run.set_status("serving")
+            run.record_phase_status(
+                "serving",
+                "starting",
+                details={
+                    "enabled": True,
+                    "backend": prepared.serving_config.backend,
+                    "runtime": prepared.serving_config.runtime,
+                },
+            )
+            with run.logging() as logger:
+                logger.info("Starting optional serving stage")
+            serving_result = serving_manager_factory().start_and_verify(
+                run_id=run.run_id,
+                run_root=run.paths.root,
+                config=prepared.serving_config,
+                base_model=prepared.config["model"]["name"],
+                resolved_revision=(
+                    run.metadata["model"].get("resolved_revision")
+                    or run.metadata["model"].get("requested_revision")
+                ),
+                adapter_path=run.paths.model,
+                lora_rank=adapter_metadata.rank,
+            )
+            run.record_phase_status(
+                "serving",
+                "ready",
+                details={
+                    "enabled": True,
+                    "backend": prepared.serving_config.backend,
+                    "runtime": prepared.serving_config.runtime,
+                    "manifest": serving_result["manifest_path"],
+                    "health_check": serving_result["health_path"],
+                    "operation": serving_result["operation_path"],
+                    "log": serving_result["log_path"],
+                    "base_url": prepared.serving_config.base_url,
+                    "models": {
+                        "base": prepared.serving_config.base_model_name,
+                        "fine_tuned": prepared.serving_config.fine_tuned_model_name,
+                    },
+                },
+            )
+            run.record_handoff(serving_result["manifest_path"], "serving")
+
+            if prepared.gateway_config.enabled:
+                current_phase = "gateway"
+                run.set_status("gateway")
+                run.record_phase_status(
+                    "gateway",
+                    "starting",
+                    details={"enabled": True, "provider": prepared.gateway_config.provider},
+                )
+                with run.logging() as logger:
+                    logger.info("Starting optional gateway registration stage")
+                gateway_result = gateway_manager_factory(
+                    prepared.gateway_config
+                ).register_and_verify(
+                    run_id=run.run_id,
+                    run_root=run.paths.root,
+                    serving=prepared.serving_config,
+                )
+                run.record_phase_status(
+                    "gateway",
+                    "ready",
+                    details={
+                        "enabled": True,
+                        "provider": prepared.gateway_config.provider,
+                        "manifest": gateway_result["manifest_path"],
+                        "registration": gateway_result["registration_path"],
+                        "health_check": gateway_result["health_path"],
+                        "log": gateway_result["log_path"],
+                    },
+                )
+                run.record_handoff(gateway_result["manifest_path"], "gateway")
+
+        run.set_status("success")
+        with run.logging() as logger:
+            logger.info("Run completed successfully")
     except Exception as error:
         try:
-            run.record_training_duration(time.monotonic() - training_started)
+            if not training_duration_recorded:
+                run.record_training_duration(time.monotonic() - training_started)
         except Exception:
             pass
+        if current_phase in {"serving", "gateway"}:
+            run.record_phase_status(current_phase, "failed", error=error)
         run.mark_failed(error)
         with run.logging() as logger:
-            logger.exception("Training run failed: %s", error)
+            if current_phase == "training":
+                logger.exception("Training run failed: %s", error)
+            else:
+                logger.exception("Pipeline %s stage failed: %s", current_phase, error)
         _print_run_summary(
             run,
             prepared.config,
             "failed",
             console_verbosity=prepared.console_verbosity,
+            failure_phase=current_phase,
         )
         raise
 

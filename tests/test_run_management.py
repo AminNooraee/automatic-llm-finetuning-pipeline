@@ -61,7 +61,9 @@ class RunManagerTests(unittest.TestCase):
         root = self.temporary_project_dir()
         model_dir = root / "model"
         model_dir.mkdir()
-        (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+        (model_dir / "adapter_config.json").write_text(
+            json.dumps({"r": 8, "base_model_name_or_path": "Org/Model"}), encoding="utf-8"
+        )
 
         with self.assertRaisesRegex(
             ArtifactValidationError, "Missing LoRA adapter weights"
@@ -74,11 +76,60 @@ class RunManagerTests(unittest.TestCase):
         model_dir.mkdir()
         config_file = model_dir / "adapter_config.json"
         weights_file = model_dir / "adapter_model.safetensors"
-        config_file.write_text("{}", encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"r": 8, "base_model_name_or_path": "Org/Model"}), encoding="utf-8"
+        )
         weights_file.write_bytes(b"weights")
 
         self.assertEqual(
             validate_model_artifacts(model_dir, "lora"),
+            [config_file, weights_file],
+        )
+
+    def test_lora_adapter_config_requires_valid_json_rank_and_matching_base(self):
+        root = self.temporary_project_dir()
+        model_dir = root / "model"
+        model_dir.mkdir()
+        config_file = model_dir / "adapter_config.json"
+        (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
+        cases = (
+            ("{", "Invalid LoRA adapter configuration JSON"),
+            (json.dumps({"base_model_name_or_path": "Org/Model"}), "field 'r'"),
+            (json.dumps({"r": 0, "base_model_name_or_path": "Org/Model"}), "positive integer"),
+            (json.dumps({"r": True, "base_model_name_or_path": "Org/Model"}), "positive integer"),
+            (json.dumps({"r": 8, "base_model_name_or_path": "Other/Model"}), "does not match"),
+        )
+        for content, message in cases:
+            with self.subTest(message=message):
+                config_file.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(ArtifactValidationError, message):
+                    validate_model_artifacts(
+                        model_dir, "lora", expected_base_model="Org/Model"
+                    )
+
+    def test_lora_adapter_base_normalization_and_revision_are_safe(self):
+        root = self.temporary_project_dir()
+        model_dir = root / "model"
+        model_dir.mkdir()
+        config_file = model_dir / "adapter_config.json"
+        weights_file = model_dir / "adapter_model.safetensors"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "r": 32,
+                    "base_model_name_or_path": "https://huggingface.co/Org/Model/tree/abc123",
+                }
+            ),
+            encoding="utf-8",
+        )
+        weights_file.write_bytes(b"weights")
+        self.assertEqual(
+            validate_model_artifacts(
+                model_dir,
+                "lora",
+                expected_base_model="Org/Model",
+                expected_base_revisions=("main", "abc123"),
+            ),
             [config_file, weights_file],
         )
 
@@ -122,7 +173,10 @@ class RunPipelineLifecycleTests(unittest.TestCase):
             arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
             model_dir = Path(arguments["output_dir"])
             model_dir.mkdir(parents=True, exist_ok=True)
-            (model_dir / "adapter_config.json").write_text("{}", encoding="utf-8")
+            (model_dir / "adapter_config.json").write_text(
+                json.dumps({"r": 8, "base_model_name_or_path": arguments["model_name_or_path"]}),
+                encoding="utf-8",
+            )
             (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
             (model_dir / "train_results.json").write_text(
                 json.dumps({"train_loss": 0.75, "train_runtime": 4.0}),

@@ -5,12 +5,28 @@ invented historical Git release sequence. Dates below are preparation dates.
 
 ## Unreleased
 
+- Added optional, backward-compatible LoRA serving through one vLLM Docker
+  process with base and static-adapter aliases, conflict-safe launch behavior,
+  direct discovery/inference verification, and provider-neutral endpoint handoff.
+- Added optional registration of both aliases through an externally managed
+  LiteLLM dynamic model-management API, preflight/alias conflict checks,
+  end-to-end gateway inference verification, partial-registration evidence, and
+  gateway handoff.
+- Added strict serving/gateway configuration, environment-only API-key resolution,
+  recursive persistence redaction, secret-safe errors/logs, phase-specific
+  lifecycle metadata, and mockable Docker/HTTP/provider interfaces.
+- Added focused serving, LiteLLM, lifecycle, and security regression coverage
+  plus a sanitized full configuration example and operational documentation.
+- Expanded the complete regression suite from the 94-test pre-feature baseline
+  to 138 passing tests with no failures or skips.
+
 - Added metadata schema v2 with requested/resolved model revision, normalized
   dataset SHA-256, environment/package/GPU snapshots, container provenance,
   training duration, normalized final Trainer metrics, and explicit
   base-model/adapter relationships.
-- Added provider-neutral future serving handoff metadata. Endpoint serving, vLLM,
-  LiteLLM, adapter merging, and Project #2 integration remain unimplemented.
+- Retained the provider-neutral base/adapter relationship and extended it with
+  optional verified direct/gateway endpoint manifests. Adapter merging and a
+  Project #2 source integration remain unimplemented.
 - Retained the full unfiltered backend stdout/stderr stream in `logs/train.log`
   alongside pipeline lifecycle logging.
 - Added `quiet`, default `concise`, and `full` console modes, including

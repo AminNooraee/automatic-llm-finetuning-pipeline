@@ -6,8 +6,9 @@ without changing the upstream trainer or its dataset registry.
 ## Inputs and outputs
 
 Inputs are YAML sections for a HuggingFace model name, dataset source and alias,
-and supported training parameters. The normal LoRA result is an adapter plus
-saved tokenizer files, not a complete standalone copy of the base model.
+supported training parameters, and optional serving/gateway stages. The normal
+LoRA result is an adapter plus saved tokenizer files, not a complete standalone
+copy of the base model.
 
 ```text
 Model name -> Model Compatibility Layer -> family/template ----+
@@ -20,7 +21,23 @@ Dataset -> source adapter -> schema adapter -> normalization --+-> dataset_info.
                                                                      |
                                                              Artifact validation
                                                                      |
-                                                           success / failed metadata
+                                                           training verified
+                                                                     |
+                                                   +-----------------+-----------------+
+                                                   |                                   |
+                                              train-only                       optional serving
+                                                                                     |
+                                                         one vLLM process: base + static LoRA aliases
+                                                                                     |
+                                                       direct discovery + two inference checks
+                                                                                     |
+                                                   +---------------------------------+----------------+
+                                                   |                                                  |
+                                          direct endpoint handoff                         optional LiteLLM
+                                                                                                    |
+                                                                             two registrations + verification
+                                                                                                    |
+                                                                                         gateway endpoint handoff
 ```
 
 Run management, metadata, and logging apply throughout. Full-method output is
@@ -40,9 +57,15 @@ supported by configuration/artifact checks but was not actually trained in accep
 8. Launch the upstream CLI with this interpreter and absolute YAML path. Write
    every raw stdout/stderr chunk to the persistent run log, then independently
    filter/format the same live stream for quiet, concise, or full console output.
-9. On exit zero, verify expected nonempty model artifacts, normalize final metrics
-   from Trainer JSON artifacts, and only then mark success.
-10. On handled errors, mark failure, preserve the error log, and raise the error.
+9. On exit zero, verify expected nonempty model artifacts and normalize final metrics.
+10. If serving is enabled, preflight Docker/port/name conflicts, start one vLLM
+    container, then verify discovery and inference through both aliases.
+11. If gateway is enabled, preflight the existing LiteLLM API and alias namespace,
+    register both routes, then verify discovery and inference through the gateway.
+12. Select the direct or gateway manifest as the downstream endpoint handoff and
+    only then mark the requested full workflow successful.
+13. On handled errors, mark the active phase and top-level run failed, preserve
+    earlier verified training artifacts, and raise the error.
     Print a final run summary for training completion/failure.
 
 Model/config validation failures happen before dataset preparation/training but
@@ -72,9 +95,14 @@ the runtime flow or the LLaMA-Factory artifact contract.
 | `yaml_generator.py` | Complete run-specific YAML generation and backend-specific checkpointing translation |
 | `trainer.py` | Upstream subprocess launch and combined training log capture |
 | `run_manager.py` | Unique paths, snapshots, metadata persistence, logging |
-| `artifact_validator.py` | Expected nonempty artifact checks for LoRA/full |
+| `artifact_validator.py` | Method-aware artifact checks; LoRA config/rank/base relationship validation; full-model file checks |
 | `observability.py` | Dataset digest, environment/container/resource capture, final metric extraction |
 | `console_output.py` | Streaming quiet/concise/full backend-console presentation |
+| `security.py`, `http_client.py` | Environment-only secret boundary, redaction, injectable JSON transport |
+| `serving/config.py`, `contracts.py`, `manager.py`, `health.py`, `manifest.py` | Typed serving contract, orchestration, endpoint verification, handoff |
+| `serving/backends/vllm_docker.py` | Conflict-safe Docker inspection/launch and vLLM command construction |
+| `gateway/config.py`, `contracts.py`, `manager.py`, `health.py`, `manifest.py` | Typed gateway contract, phase orchestration, verification, artifacts |
+| `gateway/providers/litellm.py` | LiteLLM capability checks, alias discovery, dynamic registration API |
 
 ## Adapter stages
 
@@ -99,6 +127,16 @@ runs/<UTC timestamp>_<model>_<dataset>[_collision suffix]/
   dataset/dataset_info.json
   logs/train.log
   model/
+  serving/                    # only when serving is requested
+    endpoint_manifest.json
+    health_check.json
+    operation.json
+    serving.log
+  gateway/                    # only when gateway registration is requested
+    gateway_manifest.json
+    registration.json
+    health_check.json
+    gateway.log
   environment.json
   metadata.json
 ```
@@ -115,15 +153,21 @@ normalized final metrics, and the base-model/adapter relationship.
 `trainer_state.json` stays authoritative for per-step `log_history`; metadata
 links to it instead of duplicating a potentially large history.
 
-The provider-neutral serving handoff is planning data only. Endpoint serving,
-vLLM launch, LiteLLM registration, model merging, and Project #2 integration are
-outside this phase.
+The original artifact relationship remains in metadata. Optional phase status is
+additive under `phases.training`, `phases.serving`, and `phases.gateway`, so the
+existing `training` configuration mapping remains unchanged while a later
+operational failure is distinguished from training failure. `output.endpoint_handoff` points
+to the preferred provider-neutral manifest. No Project #2 source dependency,
+model merge, automatic full-model serving, SSH orchestration, Kubernetes, or
+LiteLLM infrastructure management is introduced.
 
-LoRA validation requires nonempty `adapter_config.json` and
+LoRA validation requires parseable `adapter_config.json` with a positive rank and
+a base-model relationship matching the recorded run, plus nonempty
 `adapter_model.safetensors`. Full-method checks require nonempty `config.json`
-and matching safetensors/bin weight files. These are existence/size checks, not
-complete shard/integrity certification. Real LoRA deserialization was separately
-proved during acceptance; inference is not invoked automatically by this flow.
+and matching safetensors/bin weight files. These are not complete
+shard/integrity certification. Real LoRA deserialization was separately
+proved during training acceptance. Endpoint inference is invoked only when its
+optional serving/gateway phase is enabled.
 
 Handled preparation/training errors are recorded. Power loss can leave stale
 status because no process survives to finalize it; automatic restart/reconciliation

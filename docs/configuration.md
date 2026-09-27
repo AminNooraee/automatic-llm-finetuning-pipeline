@@ -166,3 +166,78 @@ pass-through, and it does not change training arguments or hyperparameters.
 In every mode, `logs/train.log` contains pipeline lifecycle records plus the
 complete unfiltered backend stdout/stderr stream. Console filtering never removes
 backend content from that file.
+
+## Optional serving
+
+Omitting `serving`, or setting `serving.enabled: false`, leaves the train-only
+workflow unchanged. The initial automatic path accepts only `training.method:
+lora`, `backend: vllm`, and `runtime: docker`; enabled serving with full training
+fails during preparation.
+
+```yaml
+serving:
+  enabled: true
+  backend: vllm
+  runtime: docker
+  bind_host: 0.0.0.0
+  advertise_host: model-server.example
+  port: 8101
+  base_model_name: example-base
+  fine_tuned_model_name: example-finetuned
+  container_name: auto
+  vllm:
+    image: vllm/vllm-openai:v0.11.0
+    gpu_devices: "0"
+    gpu_memory_utilization: 0.15
+    max_model_len: 4096
+    max_num_seqs: 2
+  health_check:
+    enabled: true
+    timeout_seconds: 180
+    interval_seconds: 2
+```
+
+`bind_host` controls the local published socket. `advertise_host` must be a
+reachable hostname/IP without a scheme, path, or port and becomes the host in
+the endpoint handoff and LiteLLM backend URL. It cannot be a wildcard. Port is
+1–65535; GPU devices are a unique comma-separated integer list; utilization is
+in `(0, 1]`; lengths/counts are positive integers. Explicit aliases and Docker
+names use a bounded safe-character set. `auto` values are deterministic and
+traceable to the run ID. `health_check.enabled` must be `true`: automatic
+serving is never declared ready without discovery and inference verification.
+See [serving](serving.md).
+
+## Optional LiteLLM gateway
+
+Gateway registration is allowed only with enabled, successfully verified serving.
+The gateway is externally managed; only `provider: litellm` and `registration.mode:
+dynamic_db` are implemented.
+
+```yaml
+gateway:
+  enabled: true
+  provider: litellm
+  allow_local_backend: false
+  base_url: ${LITELLM_BASE_URL}
+  api_key: ${LITELLM_API_KEY}
+  registration:
+    mode: dynamic_db
+    base_model_name: example-base
+    fine_tuned_model_name: example-finetuned
+  timeout_seconds: 60
+  health_check:
+    enabled: true
+    verify_models: true
+    verify_inference: true
+```
+
+`api_key` must be an exact `${ENVIRONMENT_VARIABLE}` reference; literal secrets
+are rejected. `base_url` must use HTTPS and is normalized to `/v1`; HTTP is
+accepted only for an explicit loopback development URL. URLs containing
+credentials, query strings, or fragments are rejected. Gateway mode also rejects
+a loopback `serving.advertise_host` unless `allow_local_backend: true` explicitly
+states that LiteLLM is co-located for local development. Resolved credentials are
+held only in memory. Input/
+resolved config snapshots preserve environment references and redact literal
+sensitive values. See [gateway registration](gateway.md) and the complete
+[sanitized example](../configs/serving_gateway_example.yaml).

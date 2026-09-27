@@ -15,6 +15,8 @@ from typing import Any, Iterator, Mapping
 
 import yaml
 
+from .security import redact_data, redact_text
+
 
 def _iso_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -38,6 +40,8 @@ class RunPaths:
     train_log: Path
     metadata: Path
     environment: Path
+    serving: Path
+    gateway: Path
 
 
 class RunManager:
@@ -54,6 +58,7 @@ class RunManager:
         self.paths = paths
         self._metadata = metadata
         self.console_verbosity = console_verbosity
+        self._secrets: list[str] = []
 
     @classmethod
     def create(
@@ -107,6 +112,8 @@ class RunManager:
             train_log=logs_dir / "train.log",
             metadata=run_root / "metadata.json",
             environment=run_root / "environment.json",
+            serving=run_root / "serving",
+            gateway=run_root / "gateway",
         )
         metadata = {
             "schema_version": 2,
@@ -121,7 +128,14 @@ class RunManager:
         manager = cls(run_id, paths, metadata, console_verbosity)
         manager._write_metadata()
         try:
-            shutil.copy2(Path(input_config_path).resolve(), paths.input_config)
+            with Path(input_config_path).resolve().open("r", encoding="utf-8") as source:
+                input_config = yaml.safe_load(source)
+            sanitized_input = redact_data(input_config)
+            if sanitized_input == input_config:
+                shutil.copy2(Path(input_config_path).resolve(), paths.input_config)
+            else:
+                with paths.input_config.open("w", encoding="utf-8") as destination:
+                    yaml.safe_dump(sanitized_input, destination, sort_keys=False)
         except Exception as error:
             manager.mark_failed(error)
             raise
@@ -147,6 +161,9 @@ class RunManager:
             stream_handler.addFilter(_QuietConsoleFilter())
         file_handler.setFormatter(formatter)
         stream_handler.setFormatter(formatter)
+        secret_filter = _SecretRedactionFilter(self._secrets)
+        file_handler.addFilter(secret_filter)
+        stream_handler.addFilter(secret_filter)
         logger.addHandler(file_handler)
         logger.addHandler(stream_handler)
         try:
@@ -188,7 +205,11 @@ class RunManager:
 
     def write_resolved_config(self, config: Mapping[str, Any]) -> None:
         with self.paths.resolved_config.open("w", encoding="utf-8") as file:
-            yaml.safe_dump(dict(config), file, sort_keys=False)
+            yaml.safe_dump(redact_data(dict(config)), file, sort_keys=False)
+
+    def register_secret(self, value: str) -> None:
+        if isinstance(value, str) and value and value not in self._secrets:
+            self._secrets.append(value)
 
     def record_model(
         self,
@@ -314,6 +335,39 @@ class RunManager:
         self._metadata["training"] = dict(training)
         self._write_metadata()
 
+    def record_phase_status(
+        self,
+        phase: str,
+        status: str,
+        *,
+        details: Mapping[str, Any] | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        phases = self._metadata.setdefault("phases", {})
+        if not isinstance(phases, dict):
+            phases = {}
+            self._metadata["phases"] = phases
+        section = phases.setdefault(phase, {})
+        if not isinstance(section, dict):
+            section = {}
+            phases[phase] = section
+        section["status"] = status
+        if details:
+            section.update(redact_data(details))
+        if error is not None:
+            section["error"] = {
+                "type": type(error).__name__,
+                "message": redact_text(error, self._secrets),
+            }
+        self._write_metadata()
+
+    def record_handoff(self, manifest_path: str, source: str) -> None:
+        self._metadata["output"]["endpoint_handoff"] = {
+            "source": source,
+            "manifest": manifest_path,
+        }
+        self._write_metadata()
+
     def set_status(self, status: str) -> None:
         self._metadata["status"] = status
         if status in {"success", "failed"}:
@@ -325,7 +379,7 @@ class RunManager:
         self._metadata["completed_at"] = _iso_utc(datetime.now(timezone.utc))
         self._metadata["error"] = {
             "type": type(error).__name__,
-            "message": str(error),
+            "message": redact_text(error, self._secrets),
         }
         self._write_metadata()
 
@@ -338,7 +392,7 @@ class RunManager:
     def _write_metadata(self) -> None:
         temporary = self.paths.metadata.with_suffix(".json.tmp")
         with temporary.open("w", encoding="utf-8") as file:
-            json.dump(self._metadata, file, indent=2, ensure_ascii=False)
+            json.dump(redact_data(self._metadata), file, indent=2, ensure_ascii=False)
         temporary.replace(self.paths.metadata)
 
 
@@ -355,3 +409,14 @@ class _QuietConsoleFilter(logging.Filter):
         return record.levelno >= logging.WARNING or record.getMessage().startswith(
             self._LIFECYCLE_PREFIXES
         )
+
+
+class _SecretRedactionFilter(logging.Filter):
+    def __init__(self, secrets: list[str]):
+        super().__init__()
+        self.secrets = secrets
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = redact_text(record.getMessage(), self.secrets)
+        record.args = ()
+        return True
