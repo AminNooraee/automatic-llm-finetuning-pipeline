@@ -110,6 +110,12 @@ for full fine-tuning in this initial implementation. Set `LITELLM_BASE_URL` and
 `LITELLM_API_KEY` in the process environment before using the example; do not
 replace the API-key reference with a literal value.
 
+Remote LiteLLM URLs require HTTPS unless the operator explicitly sets
+`gateway.allow_insecure_http: true`. That opt-in sends authenticated traffic
+without TLS, produces a warning, and should be used only on a trusted private/local
+network. It does not imply `allow_local_backend`; backend reachability remains a
+separate decision.
+
 ## Understand completion and failure
 
 Check `metadata.json`, `environment.json`, logs, manifests, and the model directory

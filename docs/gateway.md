@@ -13,8 +13,24 @@ an exact environment reference. The provider performs a model-management
 capability preflight and queries existing aliases before creating anything. If
 either requested alias exists, the phase fails without overwriting or reusing it.
 Authoritative conflicts come from `/model/info`; `/v1/models` is an additional
-client-facing check. Credential-bearing management calls require HTTPS except
-for explicit loopback development, and authenticated redirects are not followed.
+client-facing check. Credential-bearing management calls require HTTPS by default;
+HTTP loopback remains available for development. An operator may deliberately set
+`gateway.allow_insecure_http: true` for a trusted private/local network, but the
+credential is then transmitted without TLS and a non-secret warning is emitted.
+This opt-in is never automatic. Authenticated redirects are not followed.
+
+`allow_insecure_http` controls the Project #1-to-LiteLLM transport. It is distinct
+from `allow_local_backend`, which permits LiteLLM to route to a loopback/local
+model-serving backend. Enabling one never enables the other.
+
+```yaml
+gateway:
+  enabled: true
+  provider: litellm
+  base_url: http://litellm.internal:4000
+  api_key: ${LITELLM_API_KEY}
+  allow_insecure_http: true
+```
 
 The registrations map:
 

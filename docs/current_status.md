@@ -11,7 +11,7 @@ remain historical v1.0.0 records.
 
 ## Current verification
 
-- The complete current regression suite passes **138 tests** with **0 failures**
+- The complete current regression suite passes **141 tests** with **0 failures**
   and **0 skips**. This includes 32 focused serving, gateway, lifecycle, and
   secret-redaction tests that use no Docker daemon, GPU, vLLM, LiteLLM, or network.
 - The canonical CUDA Docker image builds successfully. The tested image was

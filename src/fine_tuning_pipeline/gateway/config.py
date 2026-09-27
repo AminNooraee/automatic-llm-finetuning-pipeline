@@ -40,11 +40,12 @@ class GatewayConfig:
     timeout_seconds: float = 60
     health_check: GatewayHealthConfig | None = None
     allow_local_backend: bool = False
+    allow_insecure_http: bool = False
 
 
 _TOP_FIELDS = {
     "enabled", "provider", "base_url", "api_key", "registration", "timeout_seconds",
-    "health_check", "allow_local_backend",
+    "health_check", "allow_local_backend", "allow_insecure_http",
 }
 _REGISTRATION_FIELDS = {"mode", "base_model_name", "fine_tuned_model_name"}
 _HEALTH_FIELDS = {"enabled", "verify_models", "verify_inference"}
@@ -69,6 +70,9 @@ def resolve_gateway_config(
     allow_local_backend = _boolean(
         section.get("allow_local_backend", False), "gateway.allow_local_backend"
     )
+    allow_insecure_http = _boolean(
+        section.get("allow_insecure_http", False), "gateway.allow_insecure_http"
+    )
     if _is_loopback_host(serving.advertise_host) and not allow_local_backend:
         raise GatewayConfigError(
             "gateway.enabled=true requires an explicitly gateway-reachable "
@@ -78,7 +82,8 @@ def resolve_gateway_config(
     provider = _choice(section.get("provider", "litellm"), "gateway.provider", {"litellm"})
     try:
         base_url = _url(
-            resolve_environment_value(section.get("base_url"), "gateway.base_url", environment=environment)
+            resolve_environment_value(section.get("base_url"), "gateway.base_url", environment=environment),
+            allow_insecure_http=allow_insecure_http,
         )
         api_key = resolve_secret_reference(
             section.get("api_key"), "gateway.api_key", environment=environment
@@ -133,10 +138,11 @@ def resolve_gateway_config(
         timeout_seconds=timeout,
         health_check=health,
         allow_local_backend=allow_local_backend,
+        allow_insecure_http=allow_insecure_http,
     )
 
 
-def _url(value: str) -> str:
+def _url(value: str, *, allow_insecure_http: bool) -> str:
     try:
         parsed = urlsplit(value)
         parsed.port
@@ -148,9 +154,15 @@ def _url(value: str) -> str:
         raise GatewayConfigError(
             "gateway.base_url must not contain credentials, query parameters, or a fragment"
         )
-    if parsed.scheme == "http" and not _is_loopback_host(parsed.hostname):
+    if (
+        parsed.scheme == "http"
+        and not _is_loopback_host(parsed.hostname)
+        and not allow_insecure_http
+    ):
         raise GatewayConfigError(
-            "gateway.base_url must use HTTPS when credentials are sent; HTTP is allowed only for loopback development"
+            "Remote LiteLLM HTTP endpoints are disabled by default because gateway "
+            "credentials would be transmitted without TLS. Use HTTPS or explicitly set "
+            "gateway.allow_insecure_http=true for a trusted private/local network."
         )
     path = parsed.path.rstrip("/")
     if not path.endswith("/v1"):

@@ -48,6 +48,7 @@ gateway:
   provider: litellm
   base_url: ${LITELLM_BASE_URL}
   api_key: ${LITELLM_API_KEY}
+  allow_insecure_http: false
   registration:
     mode: dynamic_db
     base_model_name: example-base

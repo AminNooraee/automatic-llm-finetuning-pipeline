@@ -4,7 +4,7 @@ The approved source/test organization is complete. Files were moved individually
 no runtime directory, environment, cache, generated output, or temporary folder
 was moved. Import and path references were updated without changing training logic.
 
-The relocation counts below are historical. Current `main` has 138 tests and later
+The relocation counts below are historical. Current `main` has 141 tests and later
 observability/provenance modules plus narrow Docker/H100 validation. See
 [current main status](current_status.md).
 

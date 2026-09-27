@@ -185,6 +185,15 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
             )
             if gateway_config.api_key is not None:
                 run.register_secret(gateway_config.api_key.reveal())
+            if (
+                gateway_config.enabled
+                and gateway_config.allow_insecure_http
+                and gateway_config.base_url.startswith("http://")
+            ):
+                logger.warning(
+                    "LiteLLM gateway is using explicitly permitted insecure HTTP. "
+                    "Use this only on a trusted private/local network."
+                )
 
             logger.info("Snapshotting dataset source %s", dataset_source)
             snapshot = run.snapshot_dataset(

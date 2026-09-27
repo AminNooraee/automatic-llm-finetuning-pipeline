@@ -218,6 +218,7 @@ gateway:
   enabled: true
   provider: litellm
   allow_local_backend: false
+  allow_insecure_http: false
   base_url: ${LITELLM_BASE_URL}
   api_key: ${LITELLM_API_KEY}
   registration:
@@ -232,12 +233,30 @@ gateway:
 ```
 
 `api_key` must be an exact `${ENVIRONMENT_VARIABLE}` reference; literal secrets
-are rejected. `base_url` must use HTTPS and is normalized to `/v1`; HTTP is
-accepted only for an explicit loopback development URL. URLs containing
-credentials, query strings, or fragments are rejected. Gateway mode also rejects
-a loopback `serving.advertise_host` unless `allow_local_backend: true` explicitly
-states that LiteLLM is co-located for local development. Resolved credentials are
-held only in memory. Input/
+are rejected. `base_url` is normalized to `/v1`. HTTPS is accepted by default,
+as is HTTP on an explicit loopback development URL. Remote HTTP is rejected
+unless the operator deliberately sets `allow_insecure_http: true`; this transmits
+the gateway credential without TLS, is appropriate only on a trusted private/local
+network, and emits a non-secret warning. The project never enables it automatically.
+URLs containing credentials, query strings, or fragments are rejected.
+
+`allow_insecure_http` controls Project #1's authenticated connection to LiteLLM.
+It is separate from `allow_local_backend`, which controls whether LiteLLM may be
+given a loopback model-server URL. Gateway mode rejects a loopback
+`serving.advertise_host` unless `allow_local_backend: true` explicitly states that
+LiteLLM is co-located for local development. Resolved credentials are held only
+in memory. Input/
 resolved config snapshots preserve environment references and redact literal
 sensitive values. See [gateway registration](gateway.md) and the complete
 [sanitized example](../configs/serving_gateway_example.yaml).
+
+Trusted-LAN HTTP example:
+
+```yaml
+gateway:
+  enabled: true
+  provider: litellm
+  base_url: http://192.168.10.20:4000
+  api_key: ${LITELLM_API_KEY}
+  allow_insecure_http: true
+```

@@ -15,10 +15,12 @@ invented historical Git release sequence. Dates below are preparation dates.
 - Added strict serving/gateway configuration, environment-only API-key resolution,
   recursive persistence redaction, secret-safe errors/logs, phase-specific
   lifecycle metadata, and mockable Docker/HTTP/provider interfaces.
+- Added an explicit, default-off `gateway.allow_insecure_http` opt-in for trusted
+  private/local networks while retaining HTTPS as the remote gateway default.
 - Added focused serving, LiteLLM, lifecycle, and security regression coverage
   plus a sanitized full configuration example and operational documentation.
 - Expanded the complete regression suite from the 94-test pre-feature baseline
-  to 138 passing tests with no failures or skips.
+  to 141 passing tests with no failures or skips.
 
 - Added metadata schema v2 with requested/resolved model revision, normalized
   dataset SHA-256, environment/package/GPU snapshots, container provenance,

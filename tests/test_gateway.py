@@ -122,7 +122,7 @@ class GatewayConfigTests(unittest.TestCase):
         cases = (
             ({"provider": "other"}, "gateway.provider"),
             ({"base_url": "ftp://gateway.example"}, "absolute http"),
-            ({"base_url": "http://gateway.example"}, "must use HTTPS"),
+            ({"base_url": "http://gateway.example"}, "allow_insecure_http=true"),
             ({"base_url": "https://user:pass@gateway.example"}, "must not contain credentials"),
             ({"health_check": {"enabled": True, "verify_models": False, "verify_inference": True}}, "requires health_check"),
             ({"timeout_seconds": 0}, "positive finite"),
@@ -134,10 +134,40 @@ class GatewayConfigTests(unittest.TestCase):
                     gateway_config(raw)
 
     def test_http_is_limited_to_explicit_loopback_development(self):
-        config = gateway_config(
-            {"base_url": "http://127.0.0.1:4000", "allow_local_backend": True}
-        )
+        config = gateway_config({"base_url": "http://127.0.0.1:4000"})
         self.assertEqual(config.base_url, "http://127.0.0.1:4000/v1")
+        self.assertFalse(config.allow_insecure_http)
+        self.assertFalse(config.allow_local_backend)
+
+    def test_remote_http_requires_explicit_transport_opt_in(self):
+        for raw in (
+            {"base_url": "http://192.168.10.20:4000"},
+            {"base_url": "http://litellm.internal:4000", "allow_insecure_http": False},
+        ):
+            with self.subTest(raw=raw):
+                with self.assertRaisesRegex(
+                    GatewayConfigError, "allow_insecure_http=true"
+                ):
+                    gateway_config(raw)
+
+        for url in (
+            "http://192.168.10.20:4000",
+            "http://litellm.internal:4000",
+        ):
+            with self.subTest(url=url):
+                config = gateway_config(
+                    {"base_url": url, "allow_insecure_http": True}
+                )
+                self.assertEqual(config.base_url, f"{url}/v1")
+                self.assertTrue(config.allow_insecure_http)
+
+        secure = gateway_config({"base_url": "https://gateway.example"})
+        self.assertEqual(secure.base_url, "https://gateway.example/v1")
+        self.assertFalse(secure.allow_insecure_http)
+
+    def test_allow_insecure_http_must_be_boolean(self):
+        with self.assertRaisesRegex(GatewayConfigError, "allow_insecure_http.*true or false"):
+            gateway_config({"allow_insecure_http": "true"})
 
     def test_loopback_serving_backend_requires_explicit_opt_in(self):
         raw = {

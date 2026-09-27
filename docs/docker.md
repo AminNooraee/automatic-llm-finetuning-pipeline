@@ -261,7 +261,7 @@ as already documented in [usage](usage.md).
 ## Validation status
 
 - Current regression suite, including console observability, serving/gateway
-  mocks, security coverage, and four static Docker checks: **138 passed**.
+  mocks, security coverage, and four static Docker checks: **141 passed**.
 - Docker Hub base-image tags/digests were verified and matched PyTorch versions
   were checked against official installation instructions.
 - The canonical CUDA image built successfully. A real acceptance smoke completed

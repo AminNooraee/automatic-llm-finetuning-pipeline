@@ -245,6 +245,10 @@ Omit `serving` and `gateway` for the unchanged train-only workflow. For the full
 sanitized operational example, see
 [configs/serving_gateway_example.yaml](configs/serving_gateway_example.yaml),
 [serving](docs/serving.md), and [gateway registration](docs/gateway.md).
+Remote LiteLLM gateways require HTTPS by default. An operator may explicitly set
+`gateway.allow_insecure_http: true` only for a trusted private/local network;
+this sends the gateway credential without TLS and produces a runtime warning.
+The project never enables this opt-in automatically.
 
 Dataset/output paths are relative to the YAML file, not the shell's working
 directory. The CLI reads the default config; it does not implement a `--config`
@@ -293,7 +297,7 @@ LiteLLM routing details. No Project #2 source dependency is introduced.
 | Run isolation, logging, metadata, and LoRA artifact verification | PASS |
 | Original acceptance regression suite | 64 passed |
 | Post-relocation regression suite | 68 passed (64 original + 4 layout checks) |
-| Current suite, including serving/gateway/security mocks and Docker contracts | 138 passed, 0 failed, 0 skipped |
+| Current suite, including serving/gateway/security mocks and Docker contracts | 141 passed, 0 failed, 0 skipped |
 | CUDA Docker build | PASS |
 | H100 Docker smoke | PASS: Qwen2.5-0.5B-Instruct, LoRA, BF16, one visible H100, tiny synthetic dataset, one epoch |
 

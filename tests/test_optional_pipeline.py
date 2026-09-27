@@ -251,6 +251,31 @@ class OptionalPipelineTests(unittest.TestCase):
         )
         self.assertNotIn(literal, all_text)
 
+    def test_explicit_insecure_gateway_warns_without_exposing_credentials(self):
+        root, config = self.temporary_project()
+        config["serving"] = {
+            "enabled": True,
+            "advertise_host": "model-server.internal",
+        }
+        config["gateway"] = {
+            "enabled": True,
+            "base_url": "http://litellm.internal:4000",
+            "api_key": "${LITELLM_API_KEY}",
+            "allow_insecure_http": True,
+        }
+        with patch.dict("os.environ", {"LITELLM_API_KEY": FAKE_SECRET}, clear=False):
+            prepare_training(
+                self.write_config(root, config), artifact_root=root / "runs"
+            )
+        run_dir = next((root / "runs").iterdir())
+        combined = "".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in run_dir.rglob("*") if path.is_file()
+        )
+        self.assertIn("explicitly permitted insecure HTTP", combined)
+        self.assertNotIn(FAKE_SECRET, combined)
+        self.assertIn("${LITELLM_API_KEY}", combined)
+
 
 if __name__ == "__main__":
     unittest.main()
