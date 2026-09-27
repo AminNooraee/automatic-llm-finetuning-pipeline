@@ -161,6 +161,28 @@ class OptionalPipelineTests(unittest.TestCase):
         self.assertNotIn(FAKE_SECRET, all_text)
         self.assertIn("${LITELLM_API_KEY}", all_text)
 
+    def test_container_training_only_does_not_resolve_gateway_secret_or_start_managers(self):
+        root, config = self.temporary_project()
+        config["serving"] = {
+            "enabled": True, "advertise_host": "model-server.example"
+        }
+        config["gateway"] = {
+            "enabled": True, "base_url": "https://gateway.example",
+            "api_key": "${LITELLM_API_KEY}",
+        }
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "fine_tuning_pipeline.train_pipeline.run_training", side_effect=create_adapter
+        ):
+            run_dir = execute_training(
+                self.write_config(root, config), runs_root=root / "runs",
+                enable_optional_phases=False,
+                serving_manager_factory=lambda: self.fail("serving manager constructed"),
+                gateway_manager_factory=lambda _config: self.fail("gateway manager constructed"),
+            )
+        metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["status"], "success")
+        self.assertFalse((run_dir / "serving").exists())
+
     def test_serving_and_gateway_failures_preserve_successful_training_phase(self):
         root, config = self.temporary_project()
         config["serving"] = {"enabled": True, "advertise_host": "model-server.example"}

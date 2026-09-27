@@ -172,3 +172,23 @@ optional serving/gateway phase is enabled.
 Handled preparation/training errors are recorded. Power loss can leave stale
 status because no process survives to finalize it; automatic restart/reconciliation
 is not implemented. See [acceptance limitations](acceptance_report.md).
+
+## Containerized deployment architecture
+
+`run_pipeline.sh` is a host-Python-free bootstrap. It builds/reuses images whose
+labels match the tracked source revision and relevant dirty-source hash, then
+starts a read-only controller with explicit writable runs, cache, state, and
+runtime-secret mounts. Only that trusted controller receives the Docker socket.
+
+The controller creates an ownership-labelled training container, persists its
+identity before start, waits for it to exit, consumes a versioned JSON result,
+removes only that exact owned trainer, and independently revalidates the adapter.
+Only then does it start vLLM. This process boundary releases the training CUDA
+context before serving. The vLLM container loads one base model and one static
+LoRA adapter and remains running with the configured restart policy. Direct
+verification precedes all external LiteLLM mutations.
+
+Host-visible roots are passed separately from controller mount paths. Result
+paths are relative, traversal is rejected, and resolved controller paths must
+remain beneath the mounted runs root; daemon bind sources are derived only after
+that validation.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class GatewayManager:
         run_id: str,
         run_root: Path,
         serving: ServingConfig,
+        cleanup_on_failure: bool = False,
     ) -> dict:
         directory = run_root / "gateway"
         directory.mkdir(parents=True, exist_ok=True)
@@ -132,8 +134,25 @@ class GatewayManager:
                 "registration_path": "gateway/registration.json",
                 "health_path": "gateway/health_check.json",
                 "log_path": "gateway/gateway.log",
+                "registrations": [
+                    {
+                        "role": item.role,
+                        "alias": item.alias,
+                        "registration_id": item.registration_id,
+                    }
+                    for item in created
+                ],
             }
         except Exception as error:
+            rolled_back: list[str] = []
+            rollback_errors: list[str] = []
+            if cleanup_on_failure and created and hasattr(self.provider, "delete_owned"):
+                for record in reversed(created):
+                    try:
+                        if self.provider.delete_owned(record, run_id=run_id):
+                            rolled_back.append(record.registration_id or record.alias)
+                    except Exception as rollback_error:
+                        rollback_errors.append(type(rollback_error).__name__)
             if attempts:
                 indeterminate = any(item.outcome == "indeterminate" for item in attempts)
                 write_json(
@@ -153,6 +172,18 @@ class GatewayManager:
                         attempts=attempts,
                     ),
                 )
+                if rolled_back:
+                    artifact_path = directory / "registration.json"
+                    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+                    artifact["automatic_rollback_performed"] = True
+                    artifact["rolled_back_registration_ids"] = rolled_back
+                    artifact["rollback_errors"] = rollback_errors
+                    write_json(artifact_path, artifact)
+                elif rollback_errors:
+                    artifact_path = directory / "registration.json"
+                    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+                    artifact["rollback_errors"] = rollback_errors
+                    write_json(artifact_path, artifact)
             secret = self.config.api_key.reveal() if self.config.api_key else ""
             safe_error = redact_text(error, [secret])
             logger.error("Gateway setup failed: %s", safe_error)

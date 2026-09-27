@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .console_output import ConsoleOutputFormatter
+from .security import redact_text
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,7 @@ class TrainingProcessResult:
     wall_clock_seconds: float
 
 
-def run_training(yaml_file, log_file=None, console_verbosity="concise"):
+def run_training(yaml_file, log_file=None, console_verbosity="concise", secrets=()):
 
     print("Starting LLaMA-Factory training...")
 
@@ -54,11 +55,13 @@ def run_training(yaml_file, log_file=None, console_verbosity="concise"):
                     if not raw:
                         break
                     chunk = raw if isinstance(raw, str) else decoder.decode(raw)
+                    chunk = redact_text(chunk, secrets)
                     stream.write(chunk)
                     stream.flush()
                     formatter.feed(chunk)
                 tail = decoder.decode(b"", final=True)
                 if tail:
+                    tail = redact_text(tail, secrets)
                     stream.write(tail)
                     stream.flush()
                     formatter.feed(tail)

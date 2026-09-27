@@ -24,6 +24,12 @@ ENV PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 FROM ${RUNTIME}-base AS application
 ARG APP_UID=1000
 ARG APP_GID=1000
+ARG SOURCE_REVISION=unknown
+ARG SOURCE_IDENTITY=unknown
+
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION} \
+      fine-tuning-pipeline.source-identity=${SOURCE_IDENTITY} \
+      fine-tuning-pipeline.image-role=trainer
 
 ENV VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
@@ -47,6 +53,7 @@ COPY src/fine_tuning_pipeline/ ./src/fine_tuning_pipeline/
 COPY configs/ ./configs/
 COPY examples/ ./examples/
 COPY tests/ ./tests/
+COPY scripts/ ./scripts/
 
 # Freeze the three selected CPU/CUDA packages before the backend resolver runs.
 # Shared dependencies (e.g. fsspec) must still resolve against datasets/backend.

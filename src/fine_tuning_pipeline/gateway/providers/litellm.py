@@ -175,6 +175,40 @@ class LiteLLMProvider:
             outcome="indeterminate",
         ) from None
 
+    def delete_owned(self, record: RegistrationRecord, *, run_id: str) -> bool:
+        """Delete one exact registration only after authoritative ownership proof."""
+        if not record.registration_id:
+            return False
+        matches = []
+        for item in self.management_models():
+            info = item.get("model_info")
+            if (
+                item.get("model_name") == record.alias
+                and _registration_id(item) == record.registration_id
+                and isinstance(info, Mapping)
+                and info.get("pipeline_run_id") == run_id
+                and info.get("pipeline_role") == record.role
+            ):
+                matches.append(item)
+        if len(matches) != 1:
+            return False
+        response = self._request(
+            "POST",
+            f"{self._management_root}/model/delete",
+            payload={"id": record.registration_id},
+        )
+        if response.status not in {200, 201, 204}:
+            raise GatewayError(
+                f"LiteLLM owned-registration rollback failed with HTTP {response.status}"
+            )
+        remaining = [
+            item for item in self.management_models()
+            if _registration_id(item) == record.registration_id
+        ]
+        if remaining:
+            raise GatewayError("LiteLLM owned-registration rollback could not be verified")
+        return True
+
     def _request(self, method: str, url: str, *, payload: Mapping[str, Any] | None = None):
         try:
             return self.transport.request(

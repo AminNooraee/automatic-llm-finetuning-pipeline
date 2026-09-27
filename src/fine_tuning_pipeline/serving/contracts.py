@@ -29,12 +29,15 @@ class ServingLaunchRequest:
     adapter_path: Path
     lora_rank: int
     config: ServingConfig
+    execution_id: str | None = None
+    host_hf_cache_path: Path | None = None
 
 
 @dataclass(frozen=True)
 class ServingLaunchResult:
     container_id: str
     command: tuple[str, ...]
+    image_id: str | None = None
 
 
 @dataclass(frozen=True)

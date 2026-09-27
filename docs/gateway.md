@@ -41,10 +41,11 @@ gateway fine-tuned alias -> openai/<direct fine-tuned alias> -> advertised vLLM 
 
 The backend URL comes from `serving.advertise_host` and `serving.port`; it is
 never forced to localhost. Each creation request carries the current pipeline
-run ID as ownership evidence. No delete/update method is implemented. If the
-first creation succeeds and the second fails, the registration artifact records
-`partial_failed`, the known current-run object is preserved, and the operator
-receives a non-secret diagnostic. A failed first creation is recorded as
+run ID as ownership evidence. Legacy calls preserve partial registrations by
+default. The controller's explicit cleanup policy may delete only an exact
+returned registration ID after authoritative run/role ownership verification.
+If cleanup is disabled, a first-success/second-failure state is recorded as
+`partial_failed` and preserved. A failed first creation is recorded as
 `registration_failed`, not as a partial registration.
 
 Every mutation attempt is recorded before it is sent. A timeout or non-success
@@ -85,3 +86,17 @@ failure behavior, both inference checks, and artifacts are mock-validated. They
 have not yet been accepted against a real LiteLLM persistent-database deployment;
 operators must qualify the exact LiteLLM version and its enabled management API
 in an isolated environment before production use.
+
+## Automated registration transaction
+
+The controller reaches LiteLLM only after direct `/v1/models` discovery and chat
+completion succeed for both vLLM aliases. `gateway.base_url` is the external
+LiteLLM client URL; the registration `api_base` is the vLLM advertised `/v1`
+URL; LiteLLM aliases and vLLM served aliases remain distinct fields.
+
+Authoritative `/model/info` data and `/v1/models` are checked before mutation and
+again between registrations. Ambiguous create responses are reconciled without a
+blind retry. With cleanup enabled, rollback calls `/model/delete` only for an
+exact returned registration ID whose management record still carries this run
+and role; deletion is verified afterward. Indeterminate operations are recorded
+and never broadly deleted. Successful registrations remain active.

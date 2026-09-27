@@ -32,6 +32,9 @@ class ServingManager:
         resolved_revision: str | None,
         adapter_path: Path,
         lora_rank: int,
+        execution_id: str | None = None,
+        host_hf_cache_path: Path | None = None,
+        cleanup_on_failure: bool = False,
     ) -> dict:
         directory = run_root / "serving"
         directory.mkdir(parents=True, exist_ok=True)
@@ -43,6 +46,8 @@ class ServingManager:
             adapter_path=adapter_path,
             lora_rank=lora_rank,
             config=config,
+            execution_id=execution_id,
+            host_hf_cache_path=host_hf_cache_path,
         )
         launch = None
         try:
@@ -56,6 +61,7 @@ class ServingManager:
                     container_name=config.container_name,
                     container_id=launch.container_id,
                     status="starting",
+                    execution_id=execution_id,
                 ),
             )
             logger.info(
@@ -84,12 +90,14 @@ class ServingManager:
                     container_name=config.container_name,
                     container_id=launch.container_id,
                     status="ready",
+                    execution_id=execution_id,
                 ),
             )
             logger.info("Direct endpoint verification passed for both model aliases")
             return {
                 "manifest": manifest,
                 "container_id": launch.container_id,
+                "image_id": launch.image_id,
                 "manifest_path": "serving/endpoint_manifest.json",
                 "health_path": "serving/health_check.json",
                 "operation_path": "serving/operation.json",
@@ -105,14 +113,44 @@ class ServingManager:
                         container_id=launch.container_id,
                         status="failed",
                         error=str(error),
+                        execution_id=execution_id,
                     ),
                 )
+                if cleanup_on_failure and hasattr(self.backend, "remove_if_owned"):
+                    removed = self.backend.remove_if_owned(request, launch.container_id)
+                    logger.info("Owned failed serving container cleanup performed=%s", removed)
             logger.exception("Serving setup failed")
             raise
         finally:
             for handler in tuple(logger.handlers):
                 logger.removeHandler(handler)
                 handler.close()
+
+    def cleanup_owned(
+        self,
+        *,
+        run_id: str,
+        execution_id: str,
+        container_id: str,
+        config: ServingConfig,
+        base_model: str,
+        adapter_path: Path,
+        lora_rank: int,
+        host_hf_cache_path: Path | None = None,
+    ) -> bool:
+        request = ServingLaunchRequest(
+            run_id=run_id,
+            base_model=base_model,
+            resolved_revision=None,
+            adapter_path=adapter_path,
+            lora_rank=lora_rank,
+            config=config,
+            execution_id=execution_id,
+            host_hf_cache_path=host_hf_cache_path,
+        )
+        if not hasattr(self.backend, "remove_if_owned"):
+            return False
+        return self.backend.remove_if_owned(request, container_id)
 
 
 def _file_logger(run_id: str, path: Path) -> logging.Logger:

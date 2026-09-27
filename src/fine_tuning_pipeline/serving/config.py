@@ -40,6 +40,7 @@ class ServingConfig:
     base_model_name: str = ""
     fine_tuned_model_name: str = ""
     container_name: str = ""
+    restart_policy: str = "no"
     vllm: VllmConfig | None = None
     health_check: HealthCheckConfig | None = None
 
@@ -53,7 +54,7 @@ class ServingConfig:
 
 _TOP_FIELDS = {
     "enabled", "backend", "runtime", "bind_host", "advertise_host", "port",
-    "base_model_name", "fine_tuned_model_name", "container_name", "vllm", "health_check",
+    "base_model_name", "fine_tuned_model_name", "container_name", "restart_policy", "vllm", "health_check",
 }
 _VLLM_FIELDS = {
     "image", "gpu_devices", "gpu_memory_utilization", "max_model_len", "max_num_seqs"
@@ -111,6 +112,11 @@ def resolve_serving_config(
     container = _container_name(
         section.get("container_name", "auto"), f"ft-serving-{trace}"
     )
+    restart_policy = _choice(
+        section.get("restart_policy", "no"),
+        "serving.restart_policy",
+        {"no", "unless-stopped", "on-failure"},
+    )
 
     raw_vllm = _mapping(section.get("vllm", {}), "serving.vllm")
     _unknown(raw_vllm, _VLLM_FIELDS, "serving.vllm")
@@ -167,6 +173,7 @@ def resolve_serving_config(
         base_model_name=base_name,
         fine_tuned_model_name=fine_name,
         container_name=container,
+        restart_policy=restart_policy,
         vllm=vllm,
         health_check=health,
     )

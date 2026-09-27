@@ -9,6 +9,7 @@
 !docker/
 docker/**
 !docker/Dockerfile
+!docker/Dockerfile.controller
 !docker/pytorch-requirements.txt
 !src/
 src/**
@@ -30,6 +31,9 @@ src/fine_tuning_pipeline/gateway/**
 !src/fine_tuning_pipeline/gateway/providers/
 src/fine_tuning_pipeline/gateway/providers/**
 !src/fine_tuning_pipeline/gateway/providers/*.py
+!src/fine_tuning_pipeline/orchestration/
+src/fine_tuning_pipeline/orchestration/**
+!src/fine_tuning_pipeline/orchestration/*.py
 !configs/
 configs/**
 !configs/config.yaml
@@ -37,6 +41,7 @@ configs/**
 !configs/llama_example.yaml
 !configs/huggingface_dataset_example.yaml
 !configs/serving_gateway_example.yaml
+!configs/full_pipeline_example.yaml
 !examples/
 examples/**
 !examples/datasets/
@@ -47,6 +52,9 @@ examples/datasets/**
 !tests/
 tests/**
 !tests/*.py
+!scripts/
+scripts/**
+!scripts/*.sh
 
 # Final exclusions also protect files nested within an allowed source directory.
 **/__pycache__

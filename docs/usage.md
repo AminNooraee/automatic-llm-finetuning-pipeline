@@ -164,3 +164,31 @@ for its adapter, followed by chat-prompt generation. See [acceptance](acceptance
 Train-only execution does not automatically run inference or merge the adapter.
 Enabled serving/gateway phases do perform their minimal endpoint inference checks;
 these establish route mechanics, not quality. Adapter merging is not implemented.
+
+## One-command fully containerized deployment
+
+```bash
+export LITELLM_BASE_URL=https://litellm.example.com
+export LITELLM_API_KEY='runtime-value'
+sh scripts/run_pipeline.sh
+```
+
+Local datasets inside the checkout use the default dataset root. To use an
+external directory, export `PIPELINE_DATASETS_DIR` as its absolute host path and
+set `dataset.path` relative to that root. The root is mounted read-only at
+`/workspace/datasets`; paths outside it are rejected.
+
+Pass a repository-local config path as the only positional argument or add
+`--rebuild`. The launcher needs no host Python. It validates Git/Docker and daemon
+access, canonicalizes/creates mount roots, detects relevant tracked and untracked
+source changes, builds or reuses both images, and returns the controller exit
+status. Inspect a completed deployment without Python using:
+
+```bash
+sh scripts/pipeline_status.sh <run-id>
+```
+
+The status command is read-only. No automatic undeploy command is provided.
+`.env.example` is a variable-name template only; the launcher deliberately does
+not source shell files. Export values through the operator's approved runtime
+secret mechanism.

@@ -286,14 +286,38 @@ It mounts only the verified current-run model directory read-only and labels the
 new container with the run ID.
 
 The canonical training image does not include a Docker CLI or mount the host
-Docker socket. Therefore its default containerized execution remains train-only.
-Run the pipeline from a trusted host Python environment with local Docker access
-for the initial automatic serving path. Do not expose a production Docker socket
-to an untrusted container. A dedicated, least-privilege containerized launcher is
-not implemented or qualified.
+Docker socket. Its direct/default containerized execution remains train-only.
+The additive one-command profile instead uses the dedicated trusted controller
+below; legacy host-Python serving remains available and unchanged. The new
+controller workflow is implemented and mock-tested but not real-runtime qualified.
 
 The vLLM image is configurable and defaults to `vllm/vllm-openai:v0.11.0` for
 the initial integration contract. Unlike the training image bases, that public
 example is tag-pinned rather than digest-pinned; operators should approve/pin a
 digest and run the isolated acceptance plan before production use. No real vLLM
 container or LiteLLM gateway was contacted by the normal regression suite.
+
+## Controller trust boundary and image reuse
+
+The one-command profile adds `docker/Dockerfile.controller`. It intentionally
+contains Docker CLI and orchestration code but no CUDA, torch, or training stack.
+The launcher mounts the Docker socket only into this controller, read-only mounts
+the checkout, and uses explicit writable mounts for runs/cache/state. A read-only
+socket mount would not remove its root-equivalent authority, so trust is based on
+reviewing the controller image and source, not mount flags.
+
+Both controller and CUDA trainer images carry source-identity labels. A matching
+image is reused; a colliding tag with mismatched provenance fails closed unless
+the operator explicitly supplies `--rebuild`. The full checkout HuggingFace cache
+root is shared with trainer and vLLM so snapshot symlinks remain usable. No
+credential is placed in an image, build argument, Docker label, or command value.
+Trainer tags also include the invoking host UID/GID, which are supplied as the
+existing non-secret image user build arguments so writable bind mounts do not
+silently depend on UID 1000.
+
+The launcher materializes credential values only in a mode-0700 temporary host
+directory, bind-mounts that directory read-only into the controller, passes only
+the HF token file (not the Docker socket or LiteLLM key) to the trainer, and
+removes the files on normal exit or handled signals. Abrupt host/process loss may
+leave that protected temporary directory for operator cleanup; no credential is
+written beneath the repository or run artifacts.

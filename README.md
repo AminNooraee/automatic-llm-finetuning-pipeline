@@ -347,6 +347,38 @@ python -m unittest discover -s tests -v
 Current documentation distinguishes the historical v1.0.0/relocation evidence
 from later unreleased validation. See [current main status](docs/current_status.md).
 
+## One-command fully containerized deployment
+
+On a Linux model server, configure the sanitized
+[`configs/full_pipeline_example.yaml`](configs/full_pipeline_example.yaml), export
+runtime credentials, and run:
+
+```bash
+export LITELLM_BASE_URL=https://litellm.example.com
+export LITELLM_API_KEY='runtime-value' # use a secret manager/shell history controls
+export HF_TOKEN='runtime-value' # only when the model requires it
+sh scripts/run_pipeline.sh
+```
+
+Local datasets inside the checkout work with the default mount. For datasets in
+an external directory, export `PIPELINE_DATASETS_DIR` as that directory's
+absolute host path and make `dataset.path` relative to that root. The launcher
+mounts the root read-only and translates the path for the trainer container.
+
+The user clones the repository, selects the model/dataset/settings, supplies
+runtime secrets, and runs that command. The pipeline builds or safely reuses
+source-identified controller and CUDA trainer images, runs training in an
+ephemeral container, validates the adapter, starts one persistent vLLM process
+for the base plus static LoRA aliases, registers both aliases in an existing
+LiteLLM, verifies both direct and gateway inference paths, and writes
+`deployment_manifest.json`.
+
+The host needs Git, Docker Engine, NVIDIA driver, and NVIDIA Container Toolkit.
+It does not need host Python, torch, Transformers, LLaMA-Factory, vLLM, or a
+virtual environment. The trusted controller mounts `/var/run/docker.sock`; that
+socket is root-equivalent host access. Never run an unreviewed controller image.
+The trainer and vLLM containers never receive the socket.
+
 ## License
 
 Original project code is licensed under [Apache License 2.0](LICENSE).

@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,7 +91,9 @@ def _resolved_dataset_source(source, config_dir):
     return str(candidate) if candidate.exists() else str(source)
 
 
-def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
+def _prepare_run(
+    config_path=None, runs_root=None, artifact_root=None, *, resolve_optional_phases=True
+):
     config_file = Path(config_path) if config_path is not None else DEFAULT_CONFIG_PATH
     config_file = config_file.resolve()
     config = load_config(config_file)
@@ -114,6 +117,8 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
         input_config_path=config_file,
         console_verbosity=console_verbosity,
     )
+    if os.environ.get("HF_TOKEN"):
+        run.register_secret(os.environ["HF_TOKEN"])
 
     with run.logging() as logger:
         logger.info("Created run %s at %s", run.run_id, run.paths.root)
@@ -172,17 +177,21 @@ def _prepare_run(config_path=None, runs_root=None, artifact_root=None):
                 base_revision=model_compatibility.resolved_revision,
                 template=model_compatibility.template,
             )
-            serving_config = resolve_serving_config(
-                config.get("serving"),
-                run_id=run.run_id,
-                base_model=configured_model_name,
-                training_method=training_config.method,
-            )
-            gateway_config = resolve_gateway_config(
-                config.get("gateway"),
-                serving=serving_config,
-                run_id=run.run_id,
-            )
+            if resolve_optional_phases:
+                serving_config = resolve_serving_config(
+                    config.get("serving"),
+                    run_id=run.run_id,
+                    base_model=configured_model_name,
+                    training_method=training_config.method,
+                )
+                gateway_config = resolve_gateway_config(
+                    config.get("gateway"),
+                    serving=serving_config,
+                    run_id=run.run_id,
+                )
+            else:
+                serving_config = ServingConfig(enabled=False)
+                gateway_config = GatewayConfig(enabled=False)
             if gateway_config.api_key is not None:
                 run.register_secret(gateway_config.api_key.reveal())
             if (
@@ -373,9 +382,14 @@ def execute_training(
     *,
     serving_manager_factory=ServingManager,
     gateway_manager_factory=GatewayManager,
+    enable_optional_phases=True,
 ):
     """Prepare, train, verify, and finalize one traceable run."""
-    prepared = _prepare_run(config_path, runs_root=runs_root)
+    prepared = _prepare_run(
+        config_path,
+        runs_root=runs_root,
+        resolve_optional_phases=enable_optional_phases,
+    )
     run = prepared.run
 
     with run.logging() as logger:
@@ -391,6 +405,7 @@ def execute_training(
             prepared.yaml_file,
             log_file=run.paths.train_log,
             console_verbosity=prepared.console_verbosity,
+            secrets=([os.environ["HF_TOKEN"]] if os.environ.get("HF_TOKEN") else ()),
         )
         duration = getattr(training_result, "wall_clock_seconds", None)
         run.record_training_duration(
@@ -421,7 +436,7 @@ def execute_training(
                 ", ".join(path.name for path in artifacts),
             )
 
-        if prepared.serving_config.enabled:
+        if enable_optional_phases and prepared.serving_config.enabled:
             adapter_metadata = read_lora_adapter_metadata(
                 run.paths.model,
                 expected_base_model=prepared.config["model"]["name"],

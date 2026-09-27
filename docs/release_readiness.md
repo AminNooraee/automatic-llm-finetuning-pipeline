@@ -199,3 +199,15 @@ No training logic, model/dataset framework, benchmarking, serving, or evaluation
 change is part of this audit. See [release notes](../RELEASE_NOTES.md),
 [changelog](../CHANGELOG.md), [functional acceptance](acceptance_report.md), and
 [Docker qualification](docker.md).
+
+## Pending real orchestration acceptance
+
+Do not execute this plan against production. On an isolated host, record before
+and after Docker/LiteLLM inventories and prove: a fresh controller starts; the
+trainer gets only the selected GPU and no socket; training completes and exits;
+the adapter/result contract validates; one persistent vLLM starts; both direct
+aliases discover and infer; both LiteLLM aliases register, discover, and infer;
+the manifest is complete; the controller exits; serving still works afterward;
+and unrelated containers and LiteLLM models are byte-for-byte unchanged. Also
+exercise training failure, port/name conflict, serving health failure, partial
+registration, ambiguous response, rollback-disabled, and rollback-enabled paths.

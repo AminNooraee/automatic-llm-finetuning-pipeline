@@ -18,6 +18,8 @@ def endpoint_manifest(config: ServingConfig) -> dict[str, Any]:
         "status": "ready",
         "api": "openai-compatible",
         "base_url": config.base_url,
+        "container_name": config.container_name,
+        "restart_policy": config.restart_policy,
         "models": {
             "base": {"name": config.base_model_name},
             "fine_tuned": {"name": config.fine_tuned_model_name},
@@ -43,6 +45,7 @@ def serving_operation(
     container_id: str,
     status: str,
     error: str | None = None,
+    execution_id: str | None = None,
 ) -> dict[str, Any]:
     value: dict[str, Any] = {
         "schema_version": 1,
@@ -50,6 +53,11 @@ def serving_operation(
         "container_name": container_name,
         "container_id": container_id,
         "ownership_label": f"fine-tuning-pipeline.run-id={run_id}",
+        "ownership_labels": {
+            "fine-tuning-pipeline.managed": "true",
+            "fine-tuning-pipeline.run-id": run_id,
+            "fine-tuning-pipeline.execution-id": execution_id or run_id,
+        },
         "status": status,
     }
     if error is not None:

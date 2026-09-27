@@ -1,5 +1,4 @@
 import json
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,7 +139,9 @@ class DockerBackendTests(unittest.TestCase):
         self.assertIn("--revision", command)
         self.assertIn("abc123", command)
         self.assertTrue(any("adapter" in item and ":/adapters/fine-tuned:ro" in item for item in command))
-        self.assertFalse(any(item in {"stop", "rm", "restart", "kill"} for item in command))
+        self.assertFalse(any(item in {"stop", "rm", "kill"} for item in command))
+        self.assertEqual(command[command.index("--restart") + 1], "no")
+        self.assertIn("fine-tuning-pipeline.managed=true", command)
 
     def test_command_omits_revision_only_when_resolution_is_unavailable(self):
         self.assertNotIn("--revision", build_vllm_docker_command(self.request(None)))
@@ -179,6 +180,61 @@ class DockerBackendTests(unittest.TestCase):
 
         with self.assertRaisesRegex(Exception, "Docker is unavailable"):
             VllmDockerBackend(runner=Runner()).preflight(self.request())
+
+    def test_cache_restart_and_execution_ownership_are_passed_without_shell_quoting(self):
+        request = ServingLaunchRequest(
+            "run-1", "Org/Base-Model", "abc123", Path("adapter path"), 8,
+            serving_config(restart_policy="unless-stopped"),
+            execution_id="exec-1", host_hf_cache_path=Path("cache path"),
+        )
+        command = build_vllm_docker_command(request)
+        self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
+        self.assertIn("fine-tuning-pipeline.execution-id=exec-1", command)
+        self.assertTrue(any("cache path" in item and ":/root/.cache/huggingface" in item for item in command))
+        self.assertTrue(any("adapter path" in item for item in command))
+
+    def test_cleanup_requires_exact_id_and_all_ownership_labels(self):
+        request = ServingLaunchRequest(
+            "run-1", "Org/Base", None, Path("adapter"), 8, serving_config(),
+            execution_id="exec-1",
+        )
+
+        class Runner:
+            def __init__(self, inspection): self.inspection = inspection; self.commands = []
+            def run(self, command):
+                self.commands.append(tuple(command))
+                if "inspect" in command:
+                    return CommandResult(0, self.inspection, "")
+                return CommandResult(0, "container-id", "")
+
+        wrong = Runner("container-id|true|other-run|exec-1\n")
+        self.assertFalse(VllmDockerBackend(runner=wrong).remove_if_owned(request, "container-id"))
+        self.assertFalse(any("rm" in command for command in wrong.commands))
+        owned = Runner("container-id|true|run-1|exec-1\n")
+        self.assertTrue(VllmDockerBackend(runner=owned).remove_if_owned(request, "container-id"))
+        self.assertEqual(owned.commands[-1][:3], ("docker", "container", "rm"))
+
+    def test_ambiguous_run_response_reconciles_only_exact_owned_container(self):
+        request = ServingLaunchRequest(
+            "run-1", "Org/Base", None, Path("adapter"), 8, serving_config(),
+            execution_id="exec-1",
+        )
+
+        class Runner:
+            def __init__(self): self.commands = []
+            def run(self, command):
+                self.commands.append(tuple(command))
+                if command[:2] == ("docker", "run"):
+                    return CommandResult(1, "", "connection reset")
+                if "container" in command and "inspect" in command:
+                    return CommandResult(0, "owned-id|true|run-1|exec-1\n", "")
+                if "image" in command and "inspect" in command:
+                    return CommandResult(0, "sha256:image\n", "")
+                raise AssertionError(command)
+
+        result = VllmDockerBackend(runner=Runner()).launch(request)
+        self.assertEqual(result.container_id, "owned-id")
+        self.assertEqual(result.image_id, "sha256:image")
 
 
 class ServingHealthTests(unittest.TestCase):

@@ -232,6 +232,37 @@ gateway:
     verify_inference: true
 ```
 
+## Full deployment fields
+
+The additive `orchestration` section is ignored by legacy train-only APIs and is
+required by the one-command controller:
+
+```yaml
+orchestration:
+  enabled: true
+  training:
+    gpu_devices: "0"
+  cleanup_on_failure: true
+
+serving:
+  restart_policy: unless-stopped  # no, on-failure, or unless-stopped
+```
+
+Training and serving GPU lists are independent. `cleanup_on_failure` permits
+rollback only for exact execution-owned resources; it never frees ports, kills
+GPU processes, replaces containers, clears cache, or deletes unrelated gateway
+models. Host roots can be set with `PIPELINE_RUNS_DIR`,
+`PIPELINE_HF_CACHE_DIR`, and `PIPELINE_STATE_DIR`. Gateway URL and credentials
+remain `${LITELLM_BASE_URL}` and `${LITELLM_API_KEY}` references.
+
+`PIPELINE_DATASETS_DIR` selects the read-only local dataset root (the checkout is
+the default). Local absolute dataset paths must stay beneath it; external-root
+paths may be written relative to that root. The controller translates the path
+into `/workspace/datasets` in a redacted worker-only config. Remote HuggingFace
+dataset identifiers remain unchanged. In orchestration mode the launcher root
+variables determine shared storage; legacy `output.runs_path` remains unchanged
+for direct Python execution.
+
 `api_key` must be an exact `${ENVIRONMENT_VARIABLE}` reference; literal secrets
 are rejected. `base_url` is normalized to `/v1`. HTTPS is accepted by default,
 as is HTTP on an explicit loopback development URL. Remote HTTP is rejected

@@ -191,6 +191,23 @@ class TrainerConsoleModeTests(unittest.TestCase):
         self.assertIn("ERROR backend exploded", terminal)
         self.assertIn("ERROR backend exploded", log)
 
+    def test_runtime_secret_is_redacted_from_raw_training_log_and_console(self):
+        secret = "fake-hf-runtime-secret"
+        log = self.temporary_dir() / "secret.log"
+        terminal = io.StringIO()
+        with patch(
+            "fine_tuning_pipeline.trainer.subprocess.Popen",
+            return_value=self.process(f"ERROR token={secret}\n", 9),
+        ), redirect_stdout(terminal):
+            with self.assertRaises(RuntimeError):
+                run_training(
+                    "training.yaml", log_file=log, console_verbosity="full",
+                    secrets=[secret],
+                )
+        self.assertNotIn(secret, terminal.getvalue())
+        self.assertNotIn(secret, log.read_text(encoding="utf-8"))
+        self.assertIn("<redacted>", terminal.getvalue())
+
     def test_invalid_config_fails_before_run_allocation(self):
         root = self.temporary_dir()
         config = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))

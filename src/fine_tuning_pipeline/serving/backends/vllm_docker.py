@@ -55,10 +55,19 @@ def build_vllm_docker_command(request: ServingLaunchRequest) -> tuple[str, ...]:
     command = [
         "docker", "run", "--detach",
         "--name", config.container_name,
+        "--restart", config.restart_policy,
+        "--label", "fine-tuning-pipeline.managed=true",
         "--label", f"fine-tuning-pipeline.run-id={request.run_id}",
+        "--label", f"fine-tuning-pipeline.execution-id={request.execution_id or request.run_id}",
         "--gpus", f"device={config.vllm.gpu_devices}",
         "--publish", f"{publish_host}:{config.port}:8000",
         "--volume", f"{adapter}:/adapters/fine-tuned:ro",
+    ]
+    if request.host_hf_cache_path is not None:
+        command.extend((
+            "--volume", f"{request.host_hf_cache_path}:/root/.cache/huggingface",
+        ))
+    command.extend([
         config.vllm.image,
         request.base_model,
         "--host", "0.0.0.0",
@@ -70,7 +79,7 @@ def build_vllm_docker_command(request: ServingLaunchRequest) -> tuple[str, ...]:
         "--gpu-memory-utilization", str(config.vllm.gpu_memory_utilization),
         "--max-model-len", str(config.vllm.max_model_len),
         "--max-num-seqs", str(config.vllm.max_num_seqs),
-    ]
+    ])
     if request.resolved_revision:
         command.extend(("--revision", request.resolved_revision))
     return tuple(command)
@@ -116,13 +125,56 @@ class VllmDockerBackend:
     def launch(self, request: ServingLaunchRequest) -> ServingLaunchResult:
         command = build_vllm_docker_command(request)
         result = self.runner.run(command)
-        if result.returncode != 0:
+        container_id = result.stdout.strip() if result.returncode == 0 else ""
+        if not container_id:
+            container_id = self._owned_container_id(request) or ""
+        if result.returncode != 0 and not container_id:
             diagnostic = " ".join((result.stderr or result.stdout).split())[:500]
             raise ServingError(
                 "vLLM Docker launch failed; no existing resource was stopped, removed, or replaced"
                 + (f": {diagnostic}" if diagnostic else "")
             )
-        container_id = result.stdout.strip()
         if not container_id:
             raise ServingError("Docker reported success but returned no vLLM container ID")
-        return ServingLaunchResult(container_id=container_id, command=command)
+        image = self.runner.run((
+            "docker", "image", "inspect", "--format", "{{.Id}}", request.config.vllm.image
+        ))
+        return ServingLaunchResult(
+            container_id=container_id,
+            command=command,
+            image_id=image.stdout.strip() if image.returncode == 0 else None,
+        )
+
+    def _owned_container_id(self, request: ServingLaunchRequest) -> str | None:
+        inspected = self.runner.run((
+            "docker", "container", "inspect", "--format",
+            "{{.Id}}|{{index .Config.Labels \"fine-tuning-pipeline.managed\"}}|"
+            "{{index .Config.Labels \"fine-tuning-pipeline.run-id\"}}|"
+            "{{index .Config.Labels \"fine-tuning-pipeline.execution-id\"}}",
+            request.config.container_name,
+        ))
+        if inspected.returncode != 0:
+            return None
+        parts = inspected.stdout.strip().split("|")
+        expected_execution = request.execution_id or request.run_id
+        if len(parts) == 4 and parts[1:] == ["true", request.run_id, expected_execution]:
+            return parts[0] or None
+        return None
+
+    def remove_if_owned(self, request: ServingLaunchRequest, container_id: str) -> bool:
+        """Remove only the exact container carrying this execution's labels."""
+        inspected = self.runner.run((
+            "docker", "container", "inspect", "--format",
+            "{{.Id}}|{{index .Config.Labels \"fine-tuning-pipeline.managed\"}}|"
+            "{{index .Config.Labels \"fine-tuning-pipeline.run-id\"}}|"
+            "{{index .Config.Labels \"fine-tuning-pipeline.execution-id\"}}",
+            request.config.container_name,
+        ))
+        execution_id = request.execution_id or request.run_id
+        expected = f"{container_id}|true|{request.run_id}|{execution_id}"
+        if inspected.returncode != 0 or inspected.stdout.strip() != expected:
+            return False
+        removed = self.runner.run(("docker", "container", "rm", "--force", container_id))
+        if removed.returncode != 0:
+            raise ServingError("Owned serving container cleanup failed")
+        return True

@@ -307,6 +307,25 @@ class LiteLLMProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.outcome, "conflict")
         self.assertEqual([call[0] for call in transport.calls], ["POST", "GET"])
 
+    def test_owned_delete_uses_exact_registration_id_and_rechecks_management_data(self):
+        owned = {
+            "model_name": "gateway-base",
+            "model_id": "id-base",
+            "model_info": {"pipeline_run_id": "run-1", "pipeline_role": "base"},
+        }
+        transport = FakeTransport([
+            JsonResponse(200, {"data": [owned]}),
+            JsonResponse(200, {}),
+            JsonResponse(200, {"data": []}),
+        ])
+        provider = LiteLLMProvider(gateway_config(), transport=transport)
+        record = RegistrationRecord(
+            "base", "gateway-base", "openai/served-base", "http://server/v1", "id-base"
+        )
+        self.assertTrue(provider.delete_owned(record, run_id="run-1"))
+        self.assertEqual(transport.calls[1][2]["payload"], {"id": "id-base"})
+        self.assertEqual([call[0] for call in transport.calls], ["GET", "POST", "GET"])
+
 
 class GatewayManagerTests(unittest.TestCase):
     class Verifier:
@@ -403,6 +422,32 @@ class GatewayManagerTests(unittest.TestCase):
             )
             self.assertNotIn(FAKE_SECRET, combined)
             self.assertNotIn("Authorization", combined)
+
+    def test_cleanup_rolls_back_only_registration_ids_created_by_this_run(self):
+        class RollbackProvider(self.Provider):
+            def __init__(self):
+                super().__init__(fail_role="fine_tuned")
+                self.deleted = []
+            def delete_owned(self, record, *, run_id):
+                self.deleted.append((record.registration_id, run_id))
+                return True
+
+        provider = RollbackProvider()
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            with self.assertRaises(GatewayError):
+                GatewayManager(
+                    gateway_config(), provider=provider, verifier=self.Verifier()
+                ).register_and_verify(
+                    run_id="run-1", run_root=root, serving=serving_config(),
+                    cleanup_on_failure=True,
+                )
+            artifact = json.loads(
+                (root / "gateway" / "registration.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(provider.deleted, [("id-base", "run-1")])
+            self.assertTrue(artifact["automatic_rollback_performed"])
+            self.assertEqual(artifact["rolled_back_registration_ids"], ["id-base"])
 
 
 if __name__ == "__main__":

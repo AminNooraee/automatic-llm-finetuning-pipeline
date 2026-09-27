@@ -178,3 +178,15 @@ past paths. Cached or generated files left in the legacy directory remain ignore
    complete, but universal GPU or full-fine-tuning qualification is not claimed.
 5. Editable source-checkout usage is supported; standalone wheel distribution
    with bundled default configs/examples is not claimed by this organization pass.
+
+## Container orchestration additions
+
+- `scripts/run_pipeline.sh`: host-Python-free build/reuse and controller launch.
+- `scripts/pipeline_status.sh`: read-only deployment-manifest inspection.
+- `docker/Dockerfile.controller`: minimal trusted Docker-socket client runtime.
+- `src/fine_tuning_pipeline/orchestration/`: strict config, controller, and
+  training-worker result contract.
+- `configs/full_pipeline_example.yaml`: sanitized full deployment profile.
+- `.env.example`: empty runtime credential/path template.
+- `runs/<run-id>/deployment_manifest.json`: provider-neutral final handoff.
+- `.pipeline-state/executions/<execution-id>/`: ignored ownership/result state.

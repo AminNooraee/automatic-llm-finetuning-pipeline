@@ -96,3 +96,14 @@ the tagged release.
   the need for licensing/privacy review of user-supplied models and datasets.
 
 See [release notes](RELEASE_NOTES.md) and [the checklist](RELEASE_CHECKLIST.md).
+
+## Unreleased - one-command containerized deployment
+
+- Added a host-Python-free shell launcher and minimal trusted controller image.
+- Added a separate ephemeral GPU training worker with a versioned relative-path
+  result contract and shared complete HuggingFace cache.
+- Added persistent ownership-labelled vLLM deployment, configurable restart
+  policy, source/image provenance, and a provider-neutral deployment manifest.
+- Added exact-ID LiteLLM rollback guarded by authoritative run/role ownership.
+- Added mocked orchestration, lifecycle, traversal, persistence, and secret
+  boundary tests. Real isolated end-to-end acceptance remains required.

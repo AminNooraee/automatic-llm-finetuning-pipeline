@@ -60,3 +60,18 @@ not require Docker, a GPU, vLLM, or network access. This implementation has not
 yet been accepted against a real vLLM v0.11.0 GPU container. Full-fine-tuned
 model serving, QLoRA, other serving backends, remote Docker/SSH, Kubernetes, and
 multi-node scheduling are not implemented.
+
+## Full deployment lifecycle
+
+The full profile sets `restart_policy: unless-stopped`; legacy configs retain the
+old `no` default. The generated `docker run` uses argv tokens (not a shell), one
+base model argument, `--served-model-name` for its alias, `--enable-lora`, one
+`name=/adapters/fine-tuned` mapping, and the rank parsed from the actual
+`adapter_config.json` as `--max-lora-rank`. A resolved model revision is supplied
+when available. The complete HuggingFace cache and adapter directory are separate
+bind mounts, so spaces remain part of one argv value.
+
+Managed, run, and execution labels are written on creation. Port/name conflicts
+fail without replacement. Failed-container removal first compares the exact ID
+and all ownership labels. Successful vLLM is never removed by the controller and
+continues after trainer, controller, and launcher exit.

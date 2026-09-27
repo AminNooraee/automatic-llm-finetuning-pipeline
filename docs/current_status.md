@@ -67,3 +67,12 @@ the backend stream written to that file.
   The Docker CUDA build/run evidence does not establish host-native clean-install
   reproduction, universal GPU qualification, or standalone-wheel distribution.
 
+## Containerized deployment status
+
+Implementation and mocked regression tests are complete; real isolated runtime
+acceptance remains required. The launcher/controller/trainer handoff, ownership
+checks, persistence policy, direct/gateway verification ordering, rollback, path
+validation, and secret-free artifacts are covered without starting Docker or
+contacting LiteLLM. This is not yet a claim of real vLLM v0.11.0 or LiteLLM
+dynamic-registration interoperability for the new orchestrator.
+
