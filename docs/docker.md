@@ -315,6 +315,15 @@ Trainer tags also include the invoking host UID/GID, which are supplied as the
 existing non-secret image user build arguments so writable bind mounts do not
 silently depend on UID 1000.
 
+`PIPELINE_DOCKER_BUILD_NETWORK` controls only the controller and trainer image
+builds. Its default, `auto`, tries normal Docker build networking first and
+retries once with `docker build --network=host` only when the captured failure
+contains a recognized DNS/network-resolution error. `default` disables that
+fallback; `host` uses host build networking immediately. Host mode reduces
+build-network isolation, so use it only where the operator accepts that tradeoff.
+The setting never adds host networking to training, serving, or gateway runtime
+containers, and matching cached images are still reused without a probe build.
+
 The launcher materializes credential values only in a mode-0700 temporary host
 directory, bind-mounts that directory read-only into the controller, passes only
 the HF token file (not the Docker socket or LiteLLM key) to the trainer, and

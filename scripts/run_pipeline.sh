@@ -4,6 +4,14 @@ set -eu
 
 REBUILD=0
 CONFIG_PATH=configs/full_pipeline_example.yaml
+DOCKER_BUILD_NETWORK=${PIPELINE_DOCKER_BUILD_NETWORK:-auto}
+case "$DOCKER_BUILD_NETWORK" in
+    auto|default|host) ;;
+    *)
+        echo "PIPELINE_DOCKER_BUILD_NETWORK must be one of: auto, default, host." >&2
+        exit 2
+        ;;
+esac
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --rebuild) REBUILD=1 ;;
@@ -72,6 +80,71 @@ HOST_GID=$(id -g)
 EXECUTION_ID=exec-$(printf '%s' "$(date -u +%Y%m%dT%H%M%SZ)-$$-$TAG_ID" | git hash-object --stdin | cut -c1-24)
 CONTROLLER_IMAGE=automatic-llm-finetuner-controller:$TAG_ID
 TRAINING_IMAGE=automatic-llm-finetuner:$TAG_ID-cuda-u${HOST_UID}g${HOST_GID}
+BUILD_LOG=
+SECRET_DIR=
+
+cleanup_temporary_files() {
+    if [ -n "$BUILD_LOG" ]; then
+        rm -f -- "$BUILD_LOG"
+    fi
+    if [ -n "$SECRET_DIR" ]; then
+        rm -f -- "$SECRET_DIR/litellm_api_key" "$SECRET_DIR/hf_token"
+        rmdir -- "$SECRET_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup_temporary_files EXIT HUP INT TERM
+
+build_failure_is_network_resolution() {
+    grep -Eiq \
+        'Temporary failure resolving|Could not resolve|Name or service not known|Network is unreachable|failure resolving|DNS resolution' \
+        "$1"
+}
+
+run_docker_build_attempt() {
+    build_network=$1
+    shift
+    BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/automatic-llm-build.XXXXXX")
+    chmod 600 "$BUILD_LOG"
+    build_status=0
+    if [ "$build_network" = host ]; then
+        docker build --network=host "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
+    else
+        docker build "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
+    fi
+    cat "$BUILD_LOG"
+    BUILD_FAILURE_WAS_NETWORK=0
+    if [ "$build_status" -ne 0 ] && build_failure_is_network_resolution "$BUILD_LOG"; then
+        BUILD_FAILURE_WAS_NETWORK=1
+    fi
+    rm -f -- "$BUILD_LOG"
+    BUILD_LOG=
+    return "$build_status"
+}
+
+run_docker_build() {
+    case "$DOCKER_BUILD_NETWORK" in
+        default)
+            run_docker_build_attempt default "$@"
+            ;;
+        host)
+            echo "Docker build is using explicitly configured host networking."
+            run_docker_build_attempt host "$@"
+            ;;
+        auto)
+            if run_docker_build_attempt default "$@"; then
+                return 0
+            else
+                first_status=$?
+            fi
+            if [ "$BUILD_FAILURE_WAS_NETWORK" -ne 1 ]; then
+                return "$first_status"
+            fi
+            echo "Docker build failed due to a network/DNS resolution error." >&2
+            echo "Retrying once with host build networking..." >&2
+            run_docker_build_attempt host "$@"
+            ;;
+    esac
+}
 
 ensure_image() {
     image=$1
@@ -87,18 +160,17 @@ ensure_image() {
         exit 1
     fi
     echo "Building image $image"
+    set -- --file "$dockerfile" --tag "$image"
     if [ -n "$runtime" ]; then
-        docker build --file "$dockerfile" --tag "$image" \
+        set -- "$@" \
             --build-arg "RUNTIME=$runtime" \
             --build-arg "APP_UID=$HOST_UID" \
-            --build-arg "APP_GID=$HOST_GID" \
-            --build-arg "SOURCE_REVISION=$SOURCE_REVISION" \
-            --build-arg "SOURCE_IDENTITY=$SOURCE_IDENTITY" "$PROJECT_DIR"
-    else
-        docker build --file "$dockerfile" --tag "$image" \
-            --build-arg "SOURCE_REVISION=$SOURCE_REVISION" \
-            --build-arg "SOURCE_IDENTITY=$SOURCE_IDENTITY" "$PROJECT_DIR"
+            --build-arg "APP_GID=$HOST_GID"
     fi
+    set -- "$@" \
+        --build-arg "SOURCE_REVISION=$SOURCE_REVISION" \
+        --build-arg "SOURCE_IDENTITY=$SOURCE_IDENTITY" "$PROJECT_DIR"
+    run_docker_build "$@"
 }
 
 ensure_image "$CONTROLLER_IMAGE" "$PROJECT_DIR/docker/Dockerfile.controller" ""
@@ -106,11 +178,6 @@ ensure_image "$TRAINING_IMAGE" "$PROJECT_DIR/docker/Dockerfile" cuda
 TRAINING_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$TRAINING_IMAGE")
 
 SECRET_DIR=$(mktemp -d "${TMPDIR:-/tmp}/automatic-llm-secrets.XXXXXX")
-cleanup_secrets() {
-    rm -f "$SECRET_DIR/litellm_api_key" "$SECRET_DIR/hf_token"
-    rmdir "$SECRET_DIR" 2>/dev/null || true
-}
-trap cleanup_secrets EXIT HUP INT TERM
 if [ -n "${LITELLM_API_KEY-}" ]; then
     (umask 077 && printf '%s' "$LITELLM_API_KEY" > "$SECRET_DIR/litellm_api_key")
 fi

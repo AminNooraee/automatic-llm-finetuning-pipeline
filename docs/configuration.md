@@ -263,6 +263,14 @@ dataset identifiers remain unchanged. In orchestration mode the launcher root
 variables determine shared storage; legacy `output.runs_path` remains unchanged
 for direct Python execution.
 
+`PIPELINE_DOCKER_BUILD_NETWORK` accepts `auto`, `default`, or `host` and defaults
+to `auto`. Auto mode first uses normal Docker build networking and retries once
+with host networking only after a recognized build-time DNS/network-resolution
+failure. Default mode never falls back; host mode uses
+`docker build --network=host` immediately. This option applies equally to the
+controller and trainer image builds and has no effect on container runtime
+networking. Host build networking provides less network isolation.
+
 `api_key` must be an exact `${ENVIRONMENT_VARIABLE}` reference; literal secrets
 are rejected. `base_url` is normalized to `/v1`. HTTPS is accepted by default,
 as is HTTP on an explicit loopback development URL. Remote HTTP is rejected

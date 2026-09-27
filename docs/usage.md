@@ -173,6 +173,12 @@ export LITELLM_API_KEY='runtime-value'
 sh scripts/run_pipeline.sh
 ```
 
+The default `PIPELINE_DOCKER_BUILD_NETWORK=auto` first uses normal Docker build
+networking. Only a recognized DNS/network-resolution failure causes one retry
+with host build networking. Set `default` to forbid fallback or `host` to request
+host build networking immediately. The option affects builds only; host mode
+reduces build-network isolation and does not alter runtime container networking.
+
 Local datasets inside the checkout use the default dataset root. To use an
 external directory, export `PIPELINE_DATASETS_DIR` as its absolute host path and
 set `dataset.path` relative to that root. The root is mounted read-only at

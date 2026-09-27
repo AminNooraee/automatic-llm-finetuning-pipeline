@@ -360,6 +360,13 @@ export HF_TOKEN='runtime-value' # only when the model requires it
 sh scripts/run_pipeline.sh
 ```
 
+Image builds use `PIPELINE_DOCKER_BUILD_NETWORK=auto` by default: the normal
+Docker build network is tried first, and a recognized DNS/network-resolution
+failure is retried once with host build networking. Set it to `default` to
+disable fallback or `host` to use host networking from the first build attempt.
+This setting affects image builds only; host build networking reduces build-time
+network isolation and does not change container runtime networking.
+
 Local datasets inside the checkout work with the default mount. For datasets in
 an external directory, export `PIPELINE_DATASETS_DIR` as that directory's
 absolute host path and make `dataset.path` relative to that root. The launcher
