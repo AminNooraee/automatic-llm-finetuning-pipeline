@@ -2,6 +2,29 @@
 
 Validation date: September 16, 2026
 
+## Current-main runtime acceptance - 2026-09-28
+
+This section records later current-main evidence and does not rewrite the
+historical Windows/CPU acceptance below. On Server53, a Linux GPU model server
+with 2x NVIDIA H100 80GB, the one-command workflow completed the accepted run
+`20260928_074935_qwen2-5-0-5b-instruct_server53-acceptance-demo` using GPU1 only.
+Training used Qwen/Qwen2.5-0.5B-Instruct, LoRA rank 8, alpha 16, BF16, one
+epoch, two synthetic/demo samples, and two optimization steps. Training and
+adapter artifacts were verified.
+
+The persistent vLLM `v0.11.0` container exposed both the base and fine-tuned
+aliases. Direct `/v1/models` discovery and inference for both aliases passed.
+Both aliases were dynamically registered in the existing Server52 LiteLLM
+gateway at `http://172.20.1.52:4000`; gateway `/v1/models` and real Chat
+Completions for both aliases passed. The direct endpoint was
+`http://172.20.1.53:8101/v1`. The serving container remained Up after pipeline
+completion, a deployment manifest was produced, and unrelated services were
+not modified.
+
+This is narrow runtime acceptance, not a claim of model-quality improvement or
+general production qualification. It does not qualify all GPUs, models,
+datasets, full fine-tuning, QLoRA, DPO, or other deployment environments.
+
 ## Post-acceptance update - 2026-09-22
 
 This section supplements the historical Windows/CPU acceptance below. It does

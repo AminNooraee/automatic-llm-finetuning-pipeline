@@ -56,8 +56,9 @@ and optional `@revision` spellings without guessing from local cache paths.
 
 The command builder, conflict behavior, timeout/model checks, both inference
 paths, lifecycle metadata, manifests, and logging are covered with mocks and do
-not require Docker, a GPU, vLLM, or network access. This implementation has not
-yet been accepted against a real vLLM v0.11.0 GPU container. Full-fine-tuned
+not require Docker, a GPU, vLLM, or network access. In addition, the complete
+one-command path was accepted on 2026-09-28 against a real vLLM `v0.11.0` GPU
+container on Server53, using Qwen2.5-0.5B LoRA/BF16 on GPU1. Full-fine-tuned
 model serving, QLoRA, other serving backends, remote Docker/SSH, Kubernetes, and
 multi-node scheduling are not implemented.
 
@@ -65,7 +66,7 @@ multi-node scheduling are not implemented.
 
 The full profile sets `restart_policy: unless-stopped`; legacy configs retain the
 old `no` default. The generated `docker run` uses argv tokens (not a shell), one
-base model argument, `--served-model-name` for its alias, `--enable-lora`, one
+explicit `--model <base_model>` argument, `--served-model-name` for its alias, `--enable-lora`, one
 `name=/adapters/fine-tuned` mapping, and the rank parsed from the actual
 `adapter_config.json` as `--max-lora-rank`. A resolved model revision is supplied
 when available. The complete HuggingFace cache and adapter directory are separate

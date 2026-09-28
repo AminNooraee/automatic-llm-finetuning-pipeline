@@ -289,13 +289,16 @@ The canonical training image does not include a Docker CLI or mount the host
 Docker socket. Its direct/default containerized execution remains train-only.
 The additive one-command profile instead uses the dedicated trusted controller
 below; legacy host-Python serving remains available and unchanged. The new
-controller workflow is implemented and mock-tested but not real-runtime qualified.
+controller workflow was accepted in the narrow 2026-09-28 Server53 runtime run
+documented in [current status](current_status.md); broader qualification remains
+separate.
 
 The vLLM image is configurable and defaults to `vllm/vllm-openai:v0.11.0` for
 the initial integration contract. Unlike the training image bases, that public
 example is tag-pinned rather than digest-pinned; operators should approve/pin a
-digest and run the isolated acceptance plan before production use. No real vLLM
-container or LiteLLM gateway was contacted by the normal regression suite.
+digest before broader production use. The normal regression suite remains fully
+isolated and contacts neither vLLM nor LiteLLM; the separate 2026-09-28 runtime
+acceptance did verify both in the documented narrow environment.
 
 ## Controller trust boundary and image reuse
 

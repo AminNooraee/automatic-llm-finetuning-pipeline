@@ -1,6 +1,6 @@
 # Current main status
 
-Status date: **2026-09-27**
+Status date: **2026-09-28**
 
 Last runtime/H100 acceptance commit: `d0875235fff2b6df11a0965a5d5fe8c5da281696`
 
@@ -27,10 +27,19 @@ remain historical v1.0.0 records.
   Trainer-phase progress and per-step loss/epoch/gradient-norm/learning-rate
   values while filtering preprocessing noise and duplicate final progress.
 
-The H100 training result is deliberately narrow. It does not qualify all GPUs, drivers,
-CUDA versions, images, model families, model sizes, datasets, or training methods.
-It does not qualify FP16, large-scale data, real full fine-tuning, or production
-serving. Optional vLLM/LiteLLM behavior is mock-validated only. Historical
+- On 2026-09-28, the complete one-command workflow was accepted on Server53
+  (Linux, 2x NVIDIA H100 80GB) using GPU1 only, with the existing Server52
+  LiteLLM gateway. Accepted run: `20260928_074935_qwen2-5-0-5b-instruct_server53-acceptance-demo`.
+  The run used Qwen/Qwen2.5-0.5B-Instruct, LoRA rank 8/alpha 16, BF16, one
+  epoch, two demo samples, and two optimization steps. Training artifacts,
+  direct vLLM discovery/inference, dynamic registration of both aliases, and
+  real LiteLLM Chat Completions for both aliases all passed. The persistent
+  serving container remained Up and a deployment manifest was produced.
+
+The H100 and Server53 end-to-end results are deliberately narrow. They do not
+qualify all GPUs, drivers, CUDA versions, images, model families, model sizes,
+datasets, or training methods. They do not qualify FP16, large-scale data, real
+full fine-tuning, QLoRA, DPO, or general production operation. Historical
 Windows/CPU training and adapter-inference evidence remains
 documented separately in the [acceptance report](acceptance_report.md).
 
@@ -60,7 +69,9 @@ the backend stream written to that file.
 - Real full-fine-tuning acceptance has not been performed.
 - FP16 has not received separate acceptance.
 - Other model families have not received equivalent H100 weight-level validation.
-- Real GPU/vLLM and LiteLLM dynamic-database runtime acceptance has not been performed.
+- The accepted runtime scope is one Server53 H100 environment, one vLLM
+  `v0.11.0` image, one Qwen2.5-0.5B LoRA/BF16 run, and one trusted private-LAN
+  LiteLLM gateway. It is not general production qualification.
 - Abrupt termination can leave stale state; automatic recovery/reconciliation is
   not implemented.
 - A complete clean-target installation remains a separate qualification gate.
@@ -69,10 +80,10 @@ the backend stream written to that file.
 
 ## Containerized deployment status
 
-Implementation and mocked regression tests are complete; real isolated runtime
-acceptance remains required. The launcher/controller/trainer handoff, ownership
-checks, persistence policy, direct/gateway verification ordering, rollback, path
-validation, and secret-free artifacts are covered without starting Docker or
-contacting LiteLLM. This is not yet a claim of real vLLM v0.11.0 or LiteLLM
-dynamic-registration interoperability for the new orchestrator.
+The one-command launcher/controller/trainer handoff, ownership checks,
+persistence policy, direct/gateway verification ordering, rollback, path
+validation, and secret-free artifacts are covered by tests and by the narrow
+2026-09-28 Server53 runtime acceptance. That acceptance verified real vLLM
+`v0.11.0` and LiteLLM dynamic registration/inference interoperability, without
+claiming broader production qualification.
 

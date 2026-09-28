@@ -5,6 +5,12 @@ invented historical Git release sequence. Dates below are preparation dates.
 
 ## Unreleased
 
+- Completed narrow real end-to-end acceptance on 2026-09-28: Server53 GPU1
+  training, persistent vLLM `v0.11.0` base-plus-LoRA serving, and dynamic
+  registration plus real inference through the existing Server52 LiteLLM
+  gateway. Scope remains limited to Qwen2.5-0.5B LoRA/BF16 and the documented
+  H100/private-LAN environment.
+
 - Added validated per-container runtime DNS propagation for the one-command
   workflow. Host-discovered or explicitly supplied resolvers are passed to both
   owned trainer and vLLM containers without changing Docker daemon or global

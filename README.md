@@ -300,6 +300,7 @@ LiteLLM routing details. No Project #2 source dependency is introduced.
 | Current suite, including serving/gateway/security mocks and Docker contracts | 141 passed, 0 failed, 0 skipped |
 | CUDA Docker build | PASS |
 | H100 Docker smoke | PASS: Qwen2.5-0.5B-Instruct, LoRA, BF16, one visible H100, tiny synthetic dataset, one epoch |
+| One-command Server53 vLLM + LiteLLM acceptance | PASS: 2026-09-28; GPU1, persistent vLLM `v0.11.0`, direct and gateway inference for both aliases |
 
 The original acceptance ran on Windows with CPU-only PyTorch. Later Docker/H100
 evidence supplements rather than rewrites that history. See the
@@ -321,8 +322,10 @@ evidence supplements rather than rewrites that history. See the
 - The accepted H100 smoke does not qualify all models, GPUs, drivers, CUDA
   versions, FP16, full fine-tuning, larger models, large datasets, or production
   serving.
-- Serving and gateway code is mock-validated but has not yet been runtime-qualified
-  against a real GPU/vLLM v0.11.0/LiteLLM dynamic-database environment.
+- Serving and gateway runtime acceptance is confirmed only for the narrow
+  Server53/Server52 Qwen2.5-0.5B LoRA/BF16 scenario documented in
+  [current status](docs/current_status.md); it is not general production
+  qualification.
 - Automatic serving is intentionally rejected for `training.method: full`; only
   LoRA + vLLM + Docker is implemented in this initial path.
 

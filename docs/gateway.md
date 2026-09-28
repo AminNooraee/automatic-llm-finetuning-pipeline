@@ -82,10 +82,12 @@ provider/verifier exceptions redact values echoed by upstream systems. Tests use
 fake secrets and scan run artifacts.
 
 The dynamic `/model/info` + `/model/new` shape, conflict/auth/capability/partial
-failure behavior, both inference checks, and artifacts are mock-validated. They
-have not yet been accepted against a real LiteLLM persistent-database deployment;
-operators must qualify the exact LiteLLM version and its enabled management API
-in an isolated environment before production use.
+failure behavior, both inference checks, and artifacts are covered by mocks. The
+complete registration and inference path was also accepted on 2026-09-28 against
+the existing Server52 LiteLLM gateway at `http://172.20.1.52:4000` on a trusted
+private LAN. Both aliases appeared in LiteLLM `/v1/models`, and real Chat
+Completions succeeded for both. This remains a narrow interoperability result,
+not general production qualification of every LiteLLM version or deployment.
 
 ## Automated registration transaction
 
