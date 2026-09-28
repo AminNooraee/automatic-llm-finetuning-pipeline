@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
+ARG DOCKER_CLI_IMAGE=docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c
 ARG CONTROLLER_IMAGE=python:3.12.7-slim-bookworm@sha256:60d9996b6a8a3689d36db740b49f4327be3be09a21122bd02fb8895abb38b50d
+FROM ${DOCKER_CLI_IMAGE} AS docker-cli
 FROM ${CONTROLLER_IMAGE}
 
 ARG SOURCE_REVISION=unknown
@@ -8,8 +10,9 @@ LABEL org.opencontainers.image.revision=${SOURCE_REVISION} \
       fine-tuning-pipeline.source-identity=${SOURCE_IDENTITY} \
       fine-tuning-pipeline.image-role=controller
 
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates docker.io tini \
+    && apt-get install -y --no-install-recommends ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1

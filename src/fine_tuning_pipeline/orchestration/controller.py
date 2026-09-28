@@ -18,7 +18,7 @@ import yaml
 from ..artifact_validator import read_lora_adapter_metadata, validate_model_artifacts
 from ..gateway.config import resolve_gateway_config
 from ..gateway.manager import GatewayManager
-from ..security import redact_data
+from ..security import redact_data, redact_text
 from ..serving.config import resolve_serving_config
 from ..serving.manager import ServingManager
 from ..training_config import resolve_training_config
@@ -45,6 +45,19 @@ class DockerRunner:
         except (OSError, subprocess.SubprocessError) as error:
             raise ControllerError(f"Docker operation could not be executed: {type(error).__name__}") from None
         return DockerResult(result.returncode, result.stdout, result.stderr)
+
+
+def _safe_docker_error_reason(
+    result: DockerResult, *, secrets: Sequence[str] = (), limit: int = 320
+) -> str:
+    """Return one bounded, redacted diagnostic line from a failed Docker call."""
+    raw = result.stderr.strip() or result.stdout.strip()
+    if not raw:
+        return f"Docker exited with status {result.returncode}"
+    reason = " ".join(redact_text(raw, list(secrets)).split())
+    if len(reason) > limit:
+        reason = reason[: limit - 3].rstrip() + "..."
+    return reason
 
 
 @dataclass(frozen=True)
@@ -253,7 +266,13 @@ class PipelineController:
         created = self.docker.run(command)
         if created.returncode != 0 or not created.stdout.strip():
             self._remove_planned_training_if_owned(training_name, execution_id)
-            raise ControllerError("Training container creation failed; no serving or gateway mutation occurred")
+            reason = _safe_docker_error_reason(
+                created, secrets=(gateway_key,) if gateway_key else ()
+            )
+            raise ControllerError(
+                f"Training container creation failed: {reason}; "
+                "no serving or gateway mutation occurred"
+            )
         training_id = created.stdout.strip()
         try:
             _atomic_json(execution_dir / "ownership.json", {

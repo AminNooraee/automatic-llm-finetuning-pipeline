@@ -13,6 +13,7 @@ from fine_tuning_pipeline.orchestration.controller import (
     DockerResult,
     PipelineController,
     RuntimeLayout,
+    _safe_docker_error_reason,
     _safe_relative,
     _worker_config,
 )
@@ -281,6 +282,53 @@ class ControllerTests(unittest.TestCase):
                 )
             self.assertEqual(FakeServingManager.instances, [])
 
+    def test_create_failure_includes_redacted_bounded_docker_reason(self):
+        secret = "controller-test-secret"
+        api_error = (
+            "Error response from daemon: client version 1.41 is too old. "
+            "Minimum supported API version is 1.44; api_key=" + secret
+        )
+        reason = _safe_docker_error_reason(
+            DockerResult(1, "", api_error), secrets=(secret,)
+        )
+        self.assertIn("client version 1.41 is too old", reason)
+        self.assertIn("Minimum supported API version is 1.44", reason)
+        self.assertNotIn(secret, reason)
+        self.assertIn("<redacted>", reason)
+        self.assertLessEqual(len(reason), 320)
+
+        class CreateFailureDocker:
+            def __init__(self):
+                self.calls = []
+
+            def run(self, command, **_kwargs):
+                command = tuple(str(item) for item in command)
+                self.calls.append(command)
+                if command[:3] == ("docker", "container", "create"):
+                    return DockerResult(1, "", api_error)
+                if command[:3] == ("docker", "container", "inspect"):
+                    return DockerResult(1, "", "not found")
+                raise AssertionError(command)
+
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            docker = CreateFailureDocker()
+            with self.assertRaises(ControllerError) as raised:
+                PipelineController(
+                    docker=docker, serving_manager_factory=FakeServingManager
+                ).deploy(
+                    execution_id="exec-12345678", config_relative="config.yaml",
+                    layout=layout, training_image="trainer:test",
+                    training_image_id="sha256:trainer",
+                    source_revision="revision", source_identity="revision",
+                )
+            message = str(raised.exception)
+            self.assertIn("client version 1.41 is too old", message)
+            self.assertIn("no serving or gateway mutation occurred", message)
+            self.assertNotIn(secret, message)
+            self.assertEqual(FakeServingManager.instances, [])
+
 
 class LauncherStaticTests(unittest.TestCase):
     def test_launcher_requires_no_host_python_and_keeps_secrets_out_of_arguments(self):
@@ -291,16 +339,30 @@ class LauncherStaticTests(unittest.TestCase):
         self.assertNotIn("python ", text.lower())
         self.assertNotIn('--env "LITELLM_API_KEY=', text)
         self.assertIn("dst=/run/pipeline-secrets,readonly", text)
-        self.assertIn("/var/run/docker.sock", text)
+        self.assertIn(
+            "--mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock",
+            text,
+        )
 
     def test_controller_image_is_minimal_and_trainer_never_receives_socket(self):
-        dockerfile = (
-            TESTS_DIR.parent / "docker" / "Dockerfile.controller"
-        ).read_text(encoding="utf-8")
-        self.assertIn("docker.io", dockerfile)
-        self.assertIn("fine_tuning_pipeline.orchestration.controller", dockerfile)
-        for forbidden in ("torch", "cuda", "vllm", "llamafactory"):
-            self.assertNotIn(forbidden, dockerfile.lower())
+        dockerfiles = [
+            (TESTS_DIR.parent / "docker" / name).read_text(encoding="utf-8")
+            for name in ("Dockerfile.controller", "Dockerfile.controller.host-dns")
+        ]
+        for dockerfile in dockerfiles:
+            self.assertNotIn("docker.io", dockerfile)
+            self.assertIn(
+                "ARG DOCKER_CLI_IMAGE=docker:27.5.1-cli@sha256:"
+                "851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c",
+                dockerfile,
+            )
+            self.assertIn(
+                "COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker",
+                dockerfile,
+            )
+            self.assertIn("fine_tuning_pipeline.orchestration.controller", dockerfile)
+            for forbidden in ("torch", "cuda", "vllm", "llamafactory"):
+                self.assertNotIn(forbidden, dockerfile.lower())
         controller = (
             TESTS_DIR.parent / "src" / "fine_tuning_pipeline" / "orchestration" / "controller.py"
         ).read_text(encoding="utf-8")
