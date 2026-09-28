@@ -47,11 +47,13 @@ normalize_build_dns() {
         function loopback(value, compact) {
             if (value == "0.0.0.0" || value == "::") return 1
             if (value ~ /^127\./) return 1
-            if (value ~ /:127\./) return 1
             if (value ~ /:/) {
                 compact = tolower(value)
                 gsub(/[0:]/, "", compact)
-                if (compact == "1") return 1
+                if (compact == "") return 1
+                if (tolower(value) ~ /^([0:]*:)1$/) return 1
+                if (tolower(value) ~ /^([0:]*:)(ffff:)?127\./) return 1
+                if (tolower(value) ~ /^([0:]*:)ffff:7f[0-9a-f][0-9a-f]:/) return 1
             }
             return 0
         }

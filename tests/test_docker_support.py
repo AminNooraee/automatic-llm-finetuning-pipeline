@@ -63,6 +63,8 @@ class DockerSupportTests(unittest.TestCase):
     def test_build_context_defaults_to_deny_and_reopens_only_project_files(self):
         self.assertEqual(self.ignore_rules[0], "**")
         for rule in ("!requirements.txt", "!pyproject.toml", "!docker/Dockerfile",
+                     "!docker/Dockerfile.host-dns",
+                     "!docker/Dockerfile.controller.host-dns",
                      "!configs/config.yaml", "!configs/serving_gateway_example.yaml",
                      "!src/fine_tuning_pipeline/*.py", "!tests/*.py"):
             self.assertIn(rule, self.ignore_rules)
@@ -79,6 +81,7 @@ class DockerSupportTests(unittest.TestCase):
             self.assertFalse(any(rule.startswith("!" + directory + "/") for rule in self.ignore_rules))
         for rule in ("**/__pycache__", "**/tmp*", "**/.env.*", "**/*.safetensors", "**/*.log"):
             self.assertIn(rule, self.ignore_rules)
+        self.assertNotIn("!docker/configure-build-dns.sh", self.ignore_rules)
 
 
 if __name__ == "__main__":

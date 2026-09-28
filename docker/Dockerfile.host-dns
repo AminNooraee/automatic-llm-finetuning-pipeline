@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
-# Build from the repository root: docker build -f docker/Dockerfile .
+# Recovery-only trainer build. The pipeline_dns context is supplied by the
+# launcher and contains a generated, validated resolv.conf.
 ARG RUNTIME=cpu
 ARG CPU_IMAGE=python:3.12.7-slim-bookworm@sha256:60d9996b6a8a3689d36db740b49f4327be3be09a21122bd02fb8895abb38b50d
 ARG CUDA_IMAGE=nvidia/cuda:12.8.1-runtime-ubuntu24.04@sha256:ebef3c171eeef0298e4eb2e4be843105edf3b8b0ac45e0b43acee358e8046867
 
 FROM ${CPU_IMAGE} AS cpu-base
-RUN apt-get update \
+RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.conf \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates git build-essential pkg-config libgomp1 tini \
     && rm -rf /var/lib/apt/lists/*
@@ -14,7 +16,8 @@ ENV PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 # CUDA runtime libraries, not a development/toolkit image. No GPU or nvcc is
 # needed to build: this project uses prebuilt wheels, not FlashAttention/QLoRA.
 FROM ${CUDA_IMAGE} AS cuda-base
-RUN apt-get update \
+RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.conf \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 python3-venv python3-dev \
         ca-certificates git build-essential pkg-config libgomp1 tini \
@@ -41,7 +44,8 @@ ENV VIRTUAL_ENV=/opt/venv \
     HOME=/home/finetuner
 
 WORKDIR /app
-RUN python3 -m venv /opt/venv \
+RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.conf \
+    python3 -m venv /opt/venv \
     && python -m pip install pip==24.2
 
 # An explicit COPY allowlist complements the root build-context allowlist.
@@ -57,7 +61,8 @@ COPY scripts/ ./scripts/
 
 # Freeze the three selected CPU/CUDA packages before the backend resolver runs.
 # Shared dependencies (e.g. fsspec) must still resolve against datasets/backend.
-RUN /bin/sh /app/docker/install-training-dependencies.sh
+RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.conf \
+    /bin/sh /app/docker/install-training-dependencies.sh
 
 # Ubuntu images may already have uid/gid 1000: reuse numeric IDs safely.
 RUN if ! getent group "${APP_GID}" >/dev/null; then \

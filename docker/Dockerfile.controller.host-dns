@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# Recovery-only controller build. The pipeline_dns context is supplied by the
+# launcher and contains a generated, validated resolv.conf.
 ARG CONTROLLER_IMAGE=python:3.12.7-slim-bookworm@sha256:60d9996b6a8a3689d36db740b49f4327be3be09a21122bd02fb8895abb38b50d
 FROM ${CONTROLLER_IMAGE}
 
@@ -8,7 +10,8 @@ LABEL org.opencontainers.image.revision=${SOURCE_REVISION} \
       fine-tuning-pipeline.source-identity=${SOURCE_IDENTITY} \
       fine-tuning-pipeline.image-role=controller
 
-RUN apt-get update \
+RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.conf \
+    apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates docker.io tini \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,7 +19,8 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY README.md LICENSE pyproject.toml ./
 COPY src/fine_tuning_pipeline/ ./src/fine_tuning_pipeline/
-RUN python -m pip install --no-cache-dir . \
+RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.conf \
+    python -m pip install --no-cache-dir . \
     && python -m compileall -q /app/src
 
 ENTRYPOINT ["/usr/bin/tini", "-g", "--"]

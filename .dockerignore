@@ -10,8 +10,9 @@
 docker/**
 !docker/Dockerfile
 !docker/Dockerfile.controller
+!docker/Dockerfile.host-dns
+!docker/Dockerfile.controller.host-dns
 !docker/pytorch-requirements.txt
-!docker/configure-build-dns.sh
 !docker/install-training-dependencies.sh
 !src/
 src/**

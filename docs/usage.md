@@ -175,15 +175,20 @@ sh scripts/run_pipeline.sh
 
 The default `PIPELINE_DOCKER_BUILD_NETWORK=auto` first uses normal Docker build
 networking. Only a recognized DNS/network-resolution failure causes one retry
-with host build networking. Set `default` to forbid fallback or `host` to request
-host build networking immediately. The option affects builds only; host mode
+with host build networking. The accepted modes are exactly `auto`, `default`,
+`host`, and `host-dns`. Set `default` to forbid fallback, `host` to request host
+build networking immediately, or `host-dns` to skip both probes and directly use
+host networking with a validated temporary DNS context. The option affects builds only; host mode
 reduces build-network isolation and does not alter runtime container networking.
 
 If host build networking also fails specifically at DNS resolution, `auto` makes
-one last attempt using validated non-loopback resolvers discovered from
+one last attempt using a private named build context populated with validated non-loopback resolvers discovered from
 `/etc/resolv.conf`. An operator can select that attempt's resolvers with, for
 example, `PIPELINE_DOCKER_BUILD_DNS='192.0.2.53 2001:db8::53'`. No resolver is
-invented, and neither host DNS files nor Docker daemon configuration are edited.
+invented. The generated context contains only normalized `nameserver` lines, is
+cleaned after success, failure, or signal, and is never part of source identity.
+Host DNS files and Docker daemon configuration are not edited, Docker is not
+restarted, no custom Buildx builder is created, and DNS is not baked into images.
 
 Local datasets inside the checkout use the default dataset root. To use an
 external directory, export `PIPELINE_DATASETS_DIR` as its absolute host path and

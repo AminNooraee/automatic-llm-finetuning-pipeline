@@ -263,21 +263,28 @@ dataset identifiers remain unchanged. In orchestration mode the launcher root
 variables determine shared storage; legacy `output.runs_path` remains unchanged
 for direct Python execution.
 
-`PIPELINE_DOCKER_BUILD_NETWORK` accepts `auto`, `default`, or `host` and defaults
-to `auto`. Auto mode first uses normal Docker build networking and retries once
+`PIPELINE_DOCKER_BUILD_NETWORK` accepts exactly `auto`, `default`, `host`, or
+`host-dns` and defaults to `auto`. Auto mode first uses normal Docker build networking and retries once
 with host networking only after a recognized build-time DNS/network-resolution
 failure. Default mode never falls back; host mode uses
-`docker build --network=host` immediately. This option applies equally to the
+`docker build --network=host` immediately. `host-dns` skips both probes and
+immediately uses host networking plus the validated DNS context described below.
+This option applies equally to the
 controller and trainer image builds and has no effect on container runtime
 networking. Host build networking provides less network isolation.
 
 If both normal and host build networking fail with a recognized DNS error,
-`auto` permits exactly one final resolver-injection attempt. By default the
+`auto` permits exactly one final DNS-context attempt. By default the
 launcher takes valid, ordered, unique, non-loopback `nameserver` IP literals from
 the host's `/etc/resolv.conf`. Set `PIPELINE_DOCKER_BUILD_DNS` to an explicit
 comma- or space-separated IPv4/IPv6 list to use that validated list instead.
 Malformed values, hostnames, shell text, and loopback/stub addresses are
-rejected. No public DNS service is inferred or appended.
+rejected. No public DNS service is inferred or appended. The launcher generates
+a private temporary context outside the repository containing only normalized `nameserver` lines and
+bind-mounts it over `/etc/resolv.conf` for networked recovery-build steps. It
+cleans the context on success, failure, and signals. It never modifies the host
+resolver file or Docker daemon, restarts Docker, creates a Buildx builder, or
+permanently bakes resolver configuration into an image.
 
 The resolver argument is supplied only to that final image-build attempt. It is
 not part of source identity, an OCI label, runtime configuration, Docker daemon
