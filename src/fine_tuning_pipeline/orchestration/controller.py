@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -58,6 +59,36 @@ def _safe_docker_error_reason(
     if len(reason) > limit:
         reason = reason[: limit - 3].rstrip() + "..."
     return reason
+
+
+def _validate_runtime_dns(values: Sequence[str]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for value in values:
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            raise ControllerError(
+                "PIPELINE_DOCKER_RUNTIME_DNS contains an invalid resolver address"
+            ) from None
+        mapped = getattr(address, "ipv4_mapped", None)
+        if address.is_loopback or address.is_unspecified or (
+            mapped is not None and mapped.is_loopback
+        ):
+            raise ControllerError(
+                "PIPELINE_DOCKER_RUNTIME_DNS contains an unusable resolver address"
+            )
+        canonical = str(address)
+        if canonical not in normalized:
+            normalized.append(canonical)
+    return tuple(normalized)
+
+
+def _runtime_dns_from_environment() -> tuple[str, ...]:
+    raw = os.environ.get("PIPELINE_DOCKER_RUNTIME_DNS", "")
+    values = raw.split()
+    if not values:
+        raise ControllerError("PIPELINE_DOCKER_RUNTIME_DNS is missing or empty")
+    return _validate_runtime_dns(values)
 
 
 @dataclass(frozen=True)
@@ -193,9 +224,11 @@ class PipelineController:
         training_image_id: str,
         source_revision: str,
         source_identity: str,
+        runtime_dns: Sequence[str] = (),
     ) -> Path:
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{7,63}", execution_id):
             raise ControllerError("Invalid execution ID")
+        runtime_dns = _validate_runtime_dns(runtime_dns)
         config_rel = _safe_relative(config_relative, "Configuration path")
         controller_config = _beneath(
             layout.controller_project, config_rel.as_posix(), "Configuration path"
@@ -242,6 +275,8 @@ class PipelineController:
             "--mount", f"type=bind,src={layout.host_cache},dst=/cache/huggingface",
             "--mount", f"type=bind,src={host_execution_dir},dst=/workspace/state/executions/{execution_id}",
         ]
+        for resolver in runtime_dns:
+            command.extend(("--dns", resolver))
         hf_secret = layout.host_secrets / "hf_token"
         if Path("/run/pipeline-secrets/hf_token").is_file():
             command.extend((
@@ -354,6 +389,7 @@ class PipelineController:
                                    or metadata.get("model", {}).get("requested_revision")),
                 adapter_path=host_model_dir, lora_rank=adapter.rank,
                 execution_id=execution_id, host_hf_cache_path=layout.host_cache,
+                runtime_dns=tuple(runtime_dns),
                 cleanup_on_failure=orchestration.cleanup_on_failure,
             )
             _record_phase(
@@ -385,6 +421,7 @@ class PipelineController:
                         container_id=serving_result["container_id"], config=serving,
                         base_model=raw["model"]["name"], adapter_path=host_model_dir,
                         lora_rank=adapter.rank, host_hf_cache_path=layout.host_cache,
+                        runtime_dns=tuple(runtime_dns),
                     )
                 except Exception as cleanup_error:
                     serving_rollback_error = type(cleanup_error).__name__
@@ -583,6 +620,7 @@ def main() -> int:
             training_image_id=os.environ["PIPELINE_TRAINING_IMAGE_ID"],
             source_revision=os.environ.get("PIPELINE_SOURCE_REVISION", "unknown"),
             source_identity=os.environ.get("PIPELINE_SOURCE_IDENTITY", "unknown"),
+            runtime_dns=_runtime_dns_from_environment(),
         )
         return 0 if manifest else 1
     except Exception as error:

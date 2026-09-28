@@ -15,6 +15,7 @@ from fine_tuning_pipeline.orchestration.controller import (
     RuntimeLayout,
     _safe_docker_error_reason,
     _safe_relative,
+    _runtime_dns_from_environment,
     _worker_config,
 )
 from fine_tuning_pipeline.orchestration.training_worker import run_worker
@@ -231,18 +232,26 @@ class ControllerTests(unittest.TestCase):
                 execution_id=execution, config_relative="config.yaml", layout=layout,
                 training_image="trainer:test", training_image_id="sha256:trainer",
                 source_revision="revision", source_identity="revision-dirty-hash",
+                runtime_dns=("192.0.2.53", "2001:db8::53"),
             )
             create = docker.calls[0]
             self.assertIn("device=1", create)
             self.assertFalse(any("docker.sock" in item for item in create))
             self.assertTrue(any("/workspace/project,readonly" in item for item in create))
             self.assertTrue(any("/cache/huggingface" in item for item in create))
+            dns_pairs = [
+                create[index + 1] for index, item in enumerate(create) if item == "--dns"
+            ]
+            self.assertEqual(dns_pairs, ["192.0.2.53", "2001:db8::53"])
             self.assertLess(
                 next(i for i, call in enumerate(docker.calls) if call[2] == "wait"),
                 len(docker.calls),
             )
             serving = FakeServingManager.instances[0]
             self.assertEqual(serving.calls[0]["execution_id"], execution)
+            self.assertEqual(
+                serving.calls[0]["runtime_dns"], ("192.0.2.53", "2001:db8::53")
+            )
             self.assertEqual(serving.calls[0]["config"].restart_policy, "unless-stopped")
             self.assertEqual(serving.cleaned, [])
             value = json.loads(manifest.read_text(encoding="utf-8"))
@@ -328,6 +337,24 @@ class ControllerTests(unittest.TestCase):
             self.assertIn("no serving or gateway mutation occurred", message)
             self.assertNotIn(secret, message)
             self.assertEqual(FakeServingManager.instances, [])
+
+    def test_runtime_dns_environment_is_revalidated_without_shell_interpretation(self):
+        with patch.dict(
+            "os.environ",
+            {"PIPELINE_DOCKER_RUNTIME_DNS": "192.0.2.53 2001:DB8::53 192.0.2.53"},
+            clear=True,
+        ):
+            self.assertEqual(
+                _runtime_dns_from_environment(), ("192.0.2.53", "2001:db8::53")
+            )
+        for value in (
+            "", "127.0.0.53", "::1", "::ffff:127.0.0.1",
+            "192.0.2.53;touch", "resolver.example",
+        ):
+            with self.subTest(value=value), patch.dict(
+                "os.environ", {"PIPELINE_DOCKER_RUNTIME_DNS": value}, clear=True
+            ), self.assertRaises(ControllerError):
+                _runtime_dns_from_environment()
 
 
 class LauncherStaticTests(unittest.TestCase):

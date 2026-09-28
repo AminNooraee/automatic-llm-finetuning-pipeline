@@ -34,6 +34,7 @@ class ServingManager:
         lora_rank: int,
         execution_id: str | None = None,
         host_hf_cache_path: Path | None = None,
+        runtime_dns: tuple[str, ...] = (),
         cleanup_on_failure: bool = False,
     ) -> dict:
         directory = run_root / "serving"
@@ -48,6 +49,7 @@ class ServingManager:
             config=config,
             execution_id=execution_id,
             host_hf_cache_path=host_hf_cache_path,
+            runtime_dns=runtime_dns,
         )
         launch = None
         try:
@@ -137,6 +139,7 @@ class ServingManager:
         adapter_path: Path,
         lora_rank: int,
         host_hf_cache_path: Path | None = None,
+        runtime_dns: tuple[str, ...] = (),
     ) -> bool:
         request = ServingLaunchRequest(
             run_id=run_id,
@@ -147,6 +150,7 @@ class ServingManager:
             config=config,
             execution_id=execution_id,
             host_hf_cache_path=host_hf_cache_path,
+            runtime_dns=runtime_dns,
         )
         if not hasattr(self.backend, "remove_if_owned"):
             return False

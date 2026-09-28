@@ -186,12 +186,17 @@ class DockerBackendTests(unittest.TestCase):
             "run-1", "Org/Base-Model", "abc123", Path("adapter path"), 8,
             serving_config(restart_policy="unless-stopped"),
             execution_id="exec-1", host_hf_cache_path=Path("cache path"),
+            runtime_dns=("192.0.2.53", "2001:db8::53"),
         )
         command = build_vllm_docker_command(request)
         self.assertEqual(command[command.index("--restart") + 1], "unless-stopped")
         self.assertIn("fine-tuning-pipeline.execution-id=exec-1", command)
         self.assertTrue(any("cache path" in item and ":/root/.cache/huggingface" in item for item in command))
         self.assertTrue(any("adapter path" in item for item in command))
+        dns_values = [
+            command[index + 1] for index, item in enumerate(command) if item == "--dns"
+        ]
+        self.assertEqual(dns_values, ["192.0.2.53", "2001:db8::53"])
 
     def test_cleanup_requires_exact_id_and_all_ownership_labels(self):
         request = ServingLaunchRequest(

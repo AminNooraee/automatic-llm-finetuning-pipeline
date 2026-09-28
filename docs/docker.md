@@ -341,8 +341,17 @@ over `/etc/resolv.conf` for every networked `RUN`; ordinary Dockerfiles do not
 reference the context. Cleanup occurs after success, failure, and signals. This
 does not edit the host's `/etc/resolv.conf`, `/etc/docker/daemon.json`, or daemon
 state, does not restart Docker or create a custom Buildx builder, does not bake
-DNS into the image, and does not change controller, trainer, vLLM, or LiteLLM
-runtime networking.
+DNS into the image, and does not change controller or LiteLLM runtime networking.
+
+Runtime DNS for the owned trainer and vLLM containers is a distinct per-container
+setting. The launcher validates and normalizes either
+`PIPELINE_DOCKER_RUNTIME_DNS` or usable host `/etc/resolv.conf` nameservers, then
+passes them through the controller as Docker `--dns` arguments. It rejects
+hostnames, malformed values, loopback/stub addresses, and shell text, and never
+invents a public resolver. Resolver addresses are printed for observability; they
+are not credentials and are not written to run metadata or repository files.
+This mechanism does not modify daemon DNS, restart Docker, create a global
+network, or enable host networking for the trainer or vLLM.
 
 The launcher materializes credential values only in a mode-0700 temporary host
 directory, bind-mounts that directory read-only into the controller, passes only

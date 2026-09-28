@@ -172,6 +172,7 @@ exit 1
     def run_launcher(
         self, *, mode=None, scenario="success", reuse=False, rebuild=False,
         failure_message=None, build_dns=None,
+        runtime_dns="192.0.2.55 2001:db8::55",
     ):
         for path in (self.log, self.context_log, self.evidence):
             path.unlink(missing_ok=True)
@@ -195,6 +196,8 @@ exit 1
             environment["FAKE_FAILURE_MESSAGE"] = failure_message
         if build_dns is not None:
             environment["PIPELINE_DOCKER_BUILD_DNS"] = build_dns
+        if runtime_dns is not None:
+            environment["PIPELINE_DOCKER_RUNTIME_DNS"] = runtime_dns
         command = [SHELL, (self.root / "scripts/run_pipeline.sh").as_posix()]
         if rebuild:
             command.append("--rebuild")
@@ -269,6 +272,28 @@ exit 1
         self.assertIn("valid, non-loopback IPv4/IPv6", result.stderr)
         self.assertEqual(self.builds(), [])
         self.assertFalse(marker.exists())
+
+    def test_invalid_explicit_runtime_dns_is_rejected_before_build(self):
+        marker = self.root / "runtime-dns-owned"
+        result = self.run_launcher(
+            runtime_dns=f"192.0.2.53;touch {marker.as_posix()}"
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("PIPELINE_DOCKER_RUNTIME_DNS", result.stderr)
+        self.assertEqual(self.builds(), [])
+        self.assertFalse(marker.exists())
+
+    def test_discovered_runtime_dns_is_passed_to_controller_as_normalized_data(self):
+        with (self.root / "scripts/build_dns.sh").open("a", encoding="utf-8") as helper:
+            helper.write("\ndiscover_build_dns() { printf '%s\\n' '192.0.2.56 2001:db8::56'; }\n")
+        result = self.run_launcher(runtime_dns=None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = [line for line in self.commands() if line.startswith("run ")]
+        self.assertEqual(len(runtime), 1)
+        self.assertIn(
+            "--env PIPELINE_DOCKER_RUNTIME_DNS=192.0.2.56 2001:db8::56",
+            runtime[0],
+        )
 
     def test_host_dns_no_usable_explicit_dns_fails_immediately(self):
         result = self.run_launcher(mode="host-dns", build_dns="127.0.0.53")
@@ -396,6 +421,24 @@ exit 1
         self.assertIn("--read-only --network host", runtime[0])
         self.assertNotIn("--network=host", runtime[0])
 
+    def test_runtime_dns_is_per_container_and_never_mutates_daemon_or_global_networks(self):
+        launcher = (REPOSITORY_ROOT / "scripts/run_pipeline.sh").read_text()
+        controller = (
+            REPOSITORY_ROOT
+            / "src/fine_tuning_pipeline/orchestration/controller.py"
+        ).read_text()
+        serving = (
+            REPOSITORY_ROOT
+            / "src/fine_tuning_pipeline/serving/backends/vllm_docker.py"
+        ).read_text()
+        combined = "\n".join((launcher, controller, serving))
+        self.assertIn('command.extend(("--dns", resolver))', controller)
+        self.assertIn('command.extend(("--dns", resolver))', serving)
+        self.assertNotIn("daemon.json", combined)
+        self.assertNotIn("docker network create", combined)
+        self.assertNotIn("systemctl", combined)
+        self.assertNotIn("service docker", combined)
+
     def test_recovery_dockerfiles_cover_every_networked_step(self):
         normal_controller = (REPOSITORY_ROOT / "docker/Dockerfile.controller").read_text()
         normal_trainer = (REPOSITORY_ROOT / "docker/Dockerfile").read_text()
@@ -463,6 +506,7 @@ exit 1
         self.assertNotRegex(combined, r"\b192\.168\.\d+\.\d+\b")
         self.assertNotRegex(combined, r"\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b")
         self.assertNotRegex(combined, r"(?i)C:\\Users\\[^\\\s]+")
+        self.assertNotRegex(combined, r"\b5\.202\.100\.(?:100|101)\b")
 
 
 if __name__ == "__main__":

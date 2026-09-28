@@ -61,8 +61,10 @@ def build_vllm_docker_command(request: ServingLaunchRequest) -> tuple[str, ...]:
         "--label", f"fine-tuning-pipeline.execution-id={request.execution_id or request.run_id}",
         "--gpus", f"device={config.vllm.gpu_devices}",
         "--publish", f"{publish_host}:{config.port}:8000",
-        "--volume", f"{adapter}:/adapters/fine-tuned:ro",
     ]
+    for resolver in request.runtime_dns:
+        command.extend(("--dns", resolver))
+    command.extend(("--volume", f"{adapter}:/adapters/fine-tuned:ro"))
     if request.host_hf_cache_path is not None:
         command.extend((
             "--volume", f"{request.host_hf_cache_path}:/root/.cache/huggingface",

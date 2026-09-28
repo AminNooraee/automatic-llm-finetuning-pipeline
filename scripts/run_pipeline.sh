@@ -44,6 +44,20 @@ if [ -n "${PIPELINE_DOCKER_BUILD_DNS-}" ]; then
         exit 2
     fi
 fi
+if [ -n "${PIPELINE_DOCKER_RUNTIME_DNS-}" ]; then
+    if RUNTIME_DNS_RESOLVERS=$(normalize_build_dns "$PIPELINE_DOCKER_RUNTIME_DNS" strict); then
+        :
+    else
+        echo "PIPELINE_DOCKER_RUNTIME_DNS must contain only valid, non-loopback IPv4/IPv6 resolver addresses." >&2
+        exit 2
+    fi
+elif RUNTIME_DNS_RESOLVERS=$(discover_build_dns /etc/resolv.conf); then
+    :
+else
+    echo "No usable non-loopback runtime DNS resolver was found in /etc/resolv.conf; set PIPELINE_DOCKER_RUNTIME_DNS explicitly." >&2
+    exit 2
+fi
+echo "Using validated runtime DNS resolvers: $RUNTIME_DNS_RESOLVERS"
 case "$CONFIG_PATH" in
     /*) CONFIG_ABS=$CONFIG_PATH ;;
     *) CONFIG_ABS=$PROJECT_DIR/$CONFIG_PATH ;;
@@ -336,6 +350,7 @@ set -- docker run --rm --read-only --network host \
     --env "PIPELINE_HOST_SECRETS_DIR=$SECRET_DIR" \
     --env "PIPELINE_TRAINING_IMAGE=$TRAINING_IMAGE" \
     --env "PIPELINE_TRAINING_IMAGE_ID=$TRAINING_IMAGE_ID" \
+    --env "PIPELINE_DOCKER_RUNTIME_DNS=$RUNTIME_DNS_RESOLVERS" \
     --env "PIPELINE_SOURCE_REVISION=$SOURCE_REVISION" \
     --env "PIPELINE_SOURCE_IDENTITY=$SOURCE_IDENTITY"
 set -- "$@" --env "PIPELINE_WORKER_UID=$HOST_UID" --env "PIPELINE_WORKER_GID=$HOST_GID"

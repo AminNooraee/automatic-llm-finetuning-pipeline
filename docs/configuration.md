@@ -290,6 +290,15 @@ The resolver argument is supplied only to that final image-build attempt. It is
 not part of source identity, an OCI label, runtime configuration, Docker daemon
 configuration, or host resolver configuration.
 
+Runtime container DNS is configured separately. By default the launcher reuses
+the same resolver discovery and validation rules against the host's
+`/etc/resolv.conf`; `PIPELINE_DOCKER_RUNTIME_DNS` may instead provide an explicit
+comma- or space-separated list. The normalized, non-loopback IP literals are
+passed into the controller and applied as per-container Docker `--dns` arguments
+to both the owned trainer and owned vLLM container. The selected addresses are
+reported as non-secret operational information. This does not edit Docker daemon
+configuration, create a network, or add host networking to either container.
+
 `api_key` must be an exact `${ENVIRONMENT_VARIABLE}` reference; literal secrets
 are rejected. `base_url` is normalized to `/v1`. HTTPS is accepted by default,
 as is HTTP on an explicit loopback development URL. Remote HTTP is rejected

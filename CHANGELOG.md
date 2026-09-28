@@ -5,6 +5,11 @@ invented historical Git release sequence. Dates below are preparation dates.
 
 ## Unreleased
 
+- Added validated per-container runtime DNS propagation for the one-command
+  workflow. Host-discovered or explicitly supplied resolvers are passed to both
+  owned trainer and vLLM containers without changing Docker daemon or global
+  network configuration.
+
 - Added `PIPELINE_DOCKER_BUILD_NETWORK=auto|default|host|host-dns`. Auto mode preserves
   normal Docker build networking first and performs a single host-network retry
   only for conservatively recognized DNS/network-resolution failures. The policy

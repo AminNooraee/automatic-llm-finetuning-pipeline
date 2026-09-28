@@ -31,6 +31,7 @@ class ServingLaunchRequest:
     config: ServingConfig
     execution_id: str | None = None
     host_hf_cache_path: Path | None = None
+    runtime_dns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
