@@ -9,6 +9,10 @@ invented historical Git release sequence. Dates below are preparation dates.
   normal Docker build networking first and performs a single host-network retry
   only for conservatively recognized DNS/network-resolution failures. The policy
   is build-only and shared by controller and trainer images.
+- Extended auto recovery with one final, bounded build attempt when BuildKit host
+  networking still cannot resolve names. Resolver IPs are strictly validated and
+  either discovered from host `nameserver` entries or explicitly supplied through
+  `PIPELINE_DOCKER_BUILD_DNS`; host and daemon configuration remain untouched.
 - Added optional, backward-compatible LoRA serving through one vLLM Docker
   process with base and static-adapter aliases, conflict-safe launch behavior,
   direct discovery/inference verification, and provider-neutral endpoint handoff.

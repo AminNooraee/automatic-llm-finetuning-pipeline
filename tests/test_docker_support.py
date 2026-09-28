@@ -13,6 +13,10 @@ class DockerSupportTests(unittest.TestCase):
     def setUp(self):
         self.dockerfile = (REPOSITORY_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
         self.instructions = re.sub(r"\\\s*\n\s*", " ", self.dockerfile)
+        dependency_script = (
+            REPOSITORY_ROOT / "docker" / "install-training-dependencies.sh"
+        ).read_text(encoding="utf-8")
+        self.dependency_instructions = re.sub(r"\\\s*\n\s*", " ", dependency_script)
         self.ignore_rules = [
             line.strip() for line in
             (REPOSITORY_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
@@ -32,11 +36,11 @@ class DockerSupportTests(unittest.TestCase):
             self.assertIn(pin, pins)
 
     def test_build_dependencies_and_non_root_entry_point(self):
-        self.assertIn("--constraint /opt/pytorch-constraints.txt", self.instructions)
-        self.assertIn("for name in ('torch', 'torchvision', 'torchaudio')", self.instructions)
-        self.assertNotIn("pip freeze > /opt/pytorch-constraints.txt", self.instructions)
-        self.assertIn("-r requirements.txt", self.instructions)
-        self.assertIn("python -m pip check", self.instructions)
+        self.assertIn("--constraint /opt/pytorch-constraints.txt", self.dependency_instructions)
+        self.assertIn("for name in ('torch', 'torchvision', 'torchaudio')", self.dependency_instructions)
+        self.assertNotIn("pip freeze > /opt/pytorch-constraints.txt", self.dependency_instructions)
+        self.assertIn("-r requirements.txt", self.dependency_instructions)
+        self.assertIn("python -m pip check", self.dependency_instructions)
         self.assertIn("RUN python -m unittest discover -s tests -v", self.instructions)
         self.assertIn("USER ${APP_UID}:${APP_GID}", self.instructions)
         command = re.search(r"^CMD (.+)$", self.instructions, re.MULTILINE).group(1)

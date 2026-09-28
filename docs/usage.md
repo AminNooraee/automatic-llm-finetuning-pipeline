@@ -179,6 +179,12 @@ with host build networking. Set `default` to forbid fallback or `host` to reques
 host build networking immediately. The option affects builds only; host mode
 reduces build-network isolation and does not alter runtime container networking.
 
+If host build networking also fails specifically at DNS resolution, `auto` makes
+one last attempt using validated non-loopback resolvers discovered from
+`/etc/resolv.conf`. An operator can select that attempt's resolvers with, for
+example, `PIPELINE_DOCKER_BUILD_DNS='192.0.2.53 2001:db8::53'`. No resolver is
+invented, and neither host DNS files nor Docker daemon configuration are edited.
+
 Local datasets inside the checkout use the default dataset root. To use an
 external directory, export `PIPELINE_DATASETS_DIR` as its absolute host path and
 set `dataset.path` relative to that root. The root is mounted read-only at

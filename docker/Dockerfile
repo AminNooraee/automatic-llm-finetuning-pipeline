@@ -5,23 +5,30 @@ ARG CPU_IMAGE=python:3.12.7-slim-bookworm@sha256:60d9996b6a8a3689d36db740b49f432
 ARG CUDA_IMAGE=nvidia/cuda:12.8.1-runtime-ubuntu24.04@sha256:ebef3c171eeef0298e4eb2e4be843105edf3b8b0ac45e0b43acee358e8046867
 
 FROM ${CPU_IMAGE} AS cpu-base
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates git build-essential pkg-config libgomp1 tini \
-    && rm -rf /var/lib/apt/lists/*
+ARG PIPELINE_BUILD_DNS=
+COPY docker/configure-build-dns.sh /usr/local/bin/configure-build-dns
+RUN /bin/sh /usr/local/bin/configure-build-dns "$PIPELINE_BUILD_DNS" \
+    /bin/sh -c 'apt-get update \
+        && apt-get install -y --no-install-recommends \
+            ca-certificates git build-essential pkg-config libgomp1 tini \
+        && rm -rf /var/lib/apt/lists/*'
 ENV PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 
 # CUDA runtime libraries, not a development/toolkit image. No GPU or nvcc is
 # needed to build: this project uses prebuilt wheels, not FlashAttention/QLoRA.
 FROM ${CUDA_IMAGE} AS cuda-base
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3 python3-venv python3-dev \
-        ca-certificates git build-essential pkg-config libgomp1 tini \
-    && rm -rf /var/lib/apt/lists/*
+ARG PIPELINE_BUILD_DNS=
+COPY docker/configure-build-dns.sh /usr/local/bin/configure-build-dns
+RUN /bin/sh /usr/local/bin/configure-build-dns "$PIPELINE_BUILD_DNS" \
+    /bin/sh -c 'apt-get update \
+        && apt-get install -y --no-install-recommends \
+            python3 python3-venv python3-dev \
+            ca-certificates git build-essential pkg-config libgomp1 tini \
+        && rm -rf /var/lib/apt/lists/*'
 ENV PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 
 FROM ${RUNTIME}-base AS application
+ARG PIPELINE_BUILD_DNS=
 ARG APP_UID=1000
 ARG APP_GID=1000
 ARG SOURCE_REVISION=unknown
@@ -41,8 +48,9 @@ ENV VIRTUAL_ENV=/opt/venv \
     HOME=/home/finetuner
 
 WORKDIR /app
-RUN python3 -m venv /opt/venv \
-    && python -m pip install pip==24.2
+RUN /bin/sh /usr/local/bin/configure-build-dns "$PIPELINE_BUILD_DNS" \
+    /bin/sh -c 'python3 -m venv /opt/venv \
+        && python -m pip install pip==24.2'
 
 # An explicit COPY allowlist complements the root build-context allowlist.
 # Editable installation preserves the existing /app/configs default contract.
@@ -57,14 +65,8 @@ COPY scripts/ ./scripts/
 
 # Freeze the three selected CPU/CUDA packages before the backend resolver runs.
 # Shared dependencies (e.g. fsspec) must still resolve against datasets/backend.
-RUN python -m pip install --index-url "${PYTORCH_INDEX_URL}" \
-        -r docker/pytorch-requirements.txt \
-    && python -c "from importlib.metadata import version; print('\n'.join(name + '==' + version(name) for name in ('torch', 'torchvision', 'torchaudio')))" > /opt/pytorch-constraints.txt \
-    && python -m pip install --constraint /opt/pytorch-constraints.txt \
-        -r requirements.txt \
-    && python -m pip check \
-    && python -m pip freeze > /opt/deployment-requirements.txt \
-    && python -c "import torch, torchvision, torchaudio, llamafactory; from fine_tuning_pipeline.train_pipeline import load_config; assert load_config()['model']['name']; print('PyTorch:', torch.__version__, 'CUDA build:', torch.version.cuda)"
+RUN /bin/sh /usr/local/bin/configure-build-dns "$PIPELINE_BUILD_DNS" \
+    /bin/sh /app/docker/install-training-dependencies.sh
 
 # Ubuntu images may already have uid/gid 1000: reuse numeric IDs safely.
 RUN if ! getent group "${APP_GID}" >/dev/null; then \

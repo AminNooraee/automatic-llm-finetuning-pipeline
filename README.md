@@ -367,6 +367,13 @@ disable fallback or `host` to use host networking from the first build attempt.
 This setting affects image builds only; host build networking reduces build-time
 network isolation and does not change container runtime networking.
 
+If BuildKit still reports DNS resolution failure with host build networking,
+`auto` performs one final build using validated non-loopback resolver IPs read
+from the host's `/etc/resolv.conf`. `PIPELINE_DOCKER_BUILD_DNS` can explicitly
+supply a comma- or space-separated IPv4/IPv6 list for that final attempt. The
+launcher never invents public resolvers and never edits host resolver or Docker
+daemon configuration.
+
 Local datasets inside the checkout work with the default mount. For datasets in
 an external directory, export `PIPELINE_DATASETS_DIR` as that directory's
 absolute host path and make `dataset.path` relative to that root. The launcher

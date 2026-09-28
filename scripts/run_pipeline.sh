@@ -34,6 +34,16 @@ docker info >/dev/null 2>&1 || {
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
+. "$PROJECT_DIR/scripts/build_dns.sh"
+EXPLICIT_BUILD_DNS=
+if [ -n "${PIPELINE_DOCKER_BUILD_DNS-}" ]; then
+    if EXPLICIT_BUILD_DNS=$(normalize_build_dns "$PIPELINE_DOCKER_BUILD_DNS" strict); then
+        :
+    else
+        echo "PIPELINE_DOCKER_BUILD_DNS must contain only valid, non-loopback IPv4/IPv6 resolver addresses." >&2
+        exit 2
+    fi
+fi
 case "$CONFIG_PATH" in
     /*) CONFIG_ABS=$CONFIG_PATH ;;
     *) CONFIG_ABS=$PROJECT_DIR/$CONFIG_PATH ;;
@@ -102,11 +112,15 @@ build_failure_is_network_resolution() {
 
 run_docker_build_attempt() {
     build_network=$1
-    shift
+    build_dns=$2
+    shift 2
     BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/automatic-llm-build.XXXXXX")
     chmod 600 "$BUILD_LOG"
     build_status=0
-    if [ "$build_network" = host ]; then
+    if [ "$build_network" = host ] && [ -n "$build_dns" ]; then
+        docker build --network=host --build-arg "PIPELINE_BUILD_DNS=$build_dns" \
+            "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
+    elif [ "$build_network" = host ]; then
         docker build --network=host "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
     else
         docker build "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
@@ -124,14 +138,14 @@ run_docker_build_attempt() {
 run_docker_build() {
     case "$DOCKER_BUILD_NETWORK" in
         default)
-            run_docker_build_attempt default "$@"
+            run_docker_build_attempt default "" "$@"
             ;;
         host)
             echo "Docker build is using explicitly configured host networking."
-            run_docker_build_attempt host "$@"
+            run_docker_build_attempt host "" "$@"
             ;;
         auto)
-            if run_docker_build_attempt default "$@"; then
+            if run_docker_build_attempt default "" "$@"; then
                 return 0
             else
                 first_status=$?
@@ -141,7 +155,25 @@ run_docker_build() {
             fi
             echo "Docker build failed due to a network/DNS resolution error." >&2
             echo "Retrying once with host build networking..." >&2
-            run_docker_build_attempt host "$@"
+            if run_docker_build_attempt host "" "$@"; then
+                return 0
+            else
+                host_status=$?
+            fi
+            if [ "$BUILD_FAILURE_WAS_NETWORK" -ne 1 ]; then
+                return "$host_status"
+            fi
+            if [ -n "$EXPLICIT_BUILD_DNS" ]; then
+                build_dns=$EXPLICIT_BUILD_DNS
+            elif build_dns=$(discover_build_dns /etc/resolv.conf); then
+                :
+            else
+                echo "Host build networking still cannot resolve package repositories, and no usable non-loopback resolver was found in /etc/resolv.conf." >&2
+                return "$host_status"
+            fi
+            echo "Host build networking still cannot resolve package repositories." >&2
+            echo "Retrying once with validated host DNS resolvers: $build_dns" >&2
+            run_docker_build_attempt host "$build_dns" "$@"
             ;;
     esac
 }

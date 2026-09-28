@@ -324,6 +324,20 @@ build-network isolation, so use it only where the operator accepts that tradeoff
 The setting never adds host networking to training, serving, or gateway runtime
 containers, and matching cached images are still reused without a probe build.
 
+Some BuildKit installations do not propagate usable host resolvers even with
+host build networking. In `auto` mode, a second recognized DNS failure permits
+one final host-network build with `PIPELINE_BUILD_DNS` supplied to the
+Dockerfiles. The launcher reads ordered `nameserver` entries from
+`/etc/resolv.conf`, removes duplicates, rejects malformed and loopback/stub
+addresses, and fails rather than inventing a public resolver. Operators may set
+`PIPELINE_DOCKER_BUILD_DNS` to a strictly validated comma- or space-separated
+IPv4/IPv6 list to select the resolvers used at this final stage.
+
+The Dockerfiles write those nameservers only inside networked image-build steps
+and only when the build argument is nonempty. This does not edit the host's
+`/etc/resolv.conf`, `/etc/docker/daemon.json`, or daemon state, and it does not
+change controller, trainer, vLLM, or LiteLLM runtime networking.
+
 The launcher materializes credential values only in a mode-0700 temporary host
 directory, bind-mounts that directory read-only into the controller, passes only
 the HF token file (not the Docker socket or LiteLLM key) to the trainer, and

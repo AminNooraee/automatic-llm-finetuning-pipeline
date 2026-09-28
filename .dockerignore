@@ -11,6 +11,8 @@ docker/**
 !docker/Dockerfile
 !docker/Dockerfile.controller
 !docker/pytorch-requirements.txt
+!docker/configure-build-dns.sh
+!docker/install-training-dependencies.sh
 !src/
 src/**
 !src/fine_tuning_pipeline/

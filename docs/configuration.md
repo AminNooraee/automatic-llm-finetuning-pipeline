@@ -271,6 +271,18 @@ failure. Default mode never falls back; host mode uses
 controller and trainer image builds and has no effect on container runtime
 networking. Host build networking provides less network isolation.
 
+If both normal and host build networking fail with a recognized DNS error,
+`auto` permits exactly one final resolver-injection attempt. By default the
+launcher takes valid, ordered, unique, non-loopback `nameserver` IP literals from
+the host's `/etc/resolv.conf`. Set `PIPELINE_DOCKER_BUILD_DNS` to an explicit
+comma- or space-separated IPv4/IPv6 list to use that validated list instead.
+Malformed values, hostnames, shell text, and loopback/stub addresses are
+rejected. No public DNS service is inferred or appended.
+
+The resolver argument is supplied only to that final image-build attempt. It is
+not part of source identity, an OCI label, runtime configuration, Docker daemon
+configuration, or host resolver configuration.
+
 `api_key` must be an exact `${ENVIRONMENT_VARIABLE}` reference; literal secrets
 are rejected. `base_url` is normalized to `/v1`. HTTPS is accepted by default,
 as is HTTP on an explicit loopback development URL. Remote HTTP is rejected
