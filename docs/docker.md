@@ -335,7 +335,7 @@ addresses, and fails rather than inventing a public resolver. Operators may set
 `PIPELINE_DOCKER_BUILD_DNS` to a strictly validated comma- or space-separated
 IPv4/IPv6 list to select the resolvers used at this final stage.
 
-The launcher writes only normalized `nameserver` lines to a mode-0600 file in a
+The launcher writes only normalized `nameserver` lines to a mode-0644 file in a
 mode-0700 temporary directory outside the repository. Recovery-specific Dockerfiles bind-mount that file
 over `/etc/resolv.conf` for every networked `RUN`; ordinary Dockerfiles do not
 reference the context. Cleanup occurs after success, failure, and signals. This

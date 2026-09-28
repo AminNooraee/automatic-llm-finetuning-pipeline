@@ -373,7 +373,7 @@ If BuildKit still reports DNS resolution failure with host build networking,
 `auto` performs one final build using validated non-loopback resolver IPs read
 from the host's `/etc/resolv.conf`. `PIPELINE_DOCKER_BUILD_DNS` can explicitly
 supply a comma- or space-separated IPv4/IPv6 list. The launcher generates a
-mode-0700 temporary named build context outside the repository containing only a mode-0600
+mode-0700 temporary named build context outside the repository containing only a mode-0644
 `resolv.conf`; DNS-recovery Dockerfiles bind it over `/etc/resolv.conf` only for
 networked `RUN` steps. The context is removed after success, failure, or signal.
 No resolver is invented, no resolver configuration is baked into an image, the

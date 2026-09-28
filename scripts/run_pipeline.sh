@@ -201,7 +201,7 @@ prepare_dns_context() {
         echo "Could not write the temporary DNS resolver file." >&2
         return 2
     fi
-    if ! chmod 600 "$DNS_CONTEXT_DIR/resolv.conf"; then
+    if ! chmod 644 "$DNS_CONTEXT_DIR/resolv.conf"; then
         cleanup_dns_context
         echo "Could not secure the temporary DNS resolver file." >&2
         return 2

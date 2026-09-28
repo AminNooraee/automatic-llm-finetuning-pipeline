@@ -355,7 +355,7 @@ exit 1
         result = self.run_launcher(mode="host-dns", build_dns="192.0.2.53")
         self.assertEqual(result.returncode, 0, result.stderr)
         permissions = [line for line in self.evidence.read_text().splitlines() if line.startswith("dir-mode=")]
-        self.assertEqual(permissions, ["dir-mode=700 file-mode=600"] * 2)
+        self.assertEqual(permissions, ["dir-mode=700 file-mode=644"] * 2)
 
     def test_host_dns_context_is_removed_after_success(self):
         result = self.run_launcher(mode="host-dns", build_dns="192.0.2.53")
