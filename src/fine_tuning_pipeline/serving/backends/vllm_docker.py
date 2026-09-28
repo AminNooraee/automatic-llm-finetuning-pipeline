@@ -71,7 +71,7 @@ def build_vllm_docker_command(request: ServingLaunchRequest) -> tuple[str, ...]:
         ))
     command.extend([
         config.vllm.image,
-        request.base_model,
+        "--model", request.base_model,
         "--host", "0.0.0.0",
         "--port", "8000",
         "--served-model-name", config.base_model_name,
