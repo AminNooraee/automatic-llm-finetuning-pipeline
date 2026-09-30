@@ -1,13 +1,19 @@
 stages:
   - smoke
 
+variables:
+  GPU_RUNNER_TAG: "finetune-gpu"
+
 gpu-runner-smoke-test:
   stage: smoke
 
   tags:
-    - worker-server53
+    - $GPU_RUNNER_TAG
 
   script:
+    - echo "=== SELECTED RUNNER TAG ==="
+    - echo "$GPU_RUNNER_TAG"
+
     - echo "=== HOST ==="
     - hostname
 
