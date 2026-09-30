@@ -1,0 +1,24 @@
+stages:
+  - smoke
+
+gpu-runner-smoke-test:
+  stage: smoke
+
+  tags:
+    - worker-server53
+
+  script:
+    - echo "=== HOST ==="
+    - hostname
+
+    - echo "=== USER ==="
+    - whoami
+    - id
+
+    - echo "=== GPU ==="
+    - nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader
+
+    - echo "=== DOCKER ==="
+    - docker version --format '{{.Server.Version}}'
+
+    - echo "=== RUNNER SMOKE TEST PASSED ==="
