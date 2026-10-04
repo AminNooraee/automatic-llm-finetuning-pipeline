@@ -15,6 +15,10 @@ gpu-runner-smoke-test:
     - echo "=== SELECTED RUNNER TAG ==="
     - echo "$GPU_RUNNER_TAG"
 
+    - 'test -n "${SERVING_ADVERTISE_HOST:-}" || { echo "SERVING_ADVERTISE_HOST must be supplied by the runner environment." >&2; exit 1; }'
+    - echo "=== SERVING ADVERTISE HOST ==="
+    - printf '%s\n' "$SERVING_ADVERTISE_HOST"
+
     - echo "=== HOST ==="
     - hostname
 
