@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Sequence
@@ -89,6 +89,22 @@ def _runtime_dns_from_environment() -> tuple[str, ...]:
     if not values:
         raise ControllerError("PIPELINE_DOCKER_RUNTIME_DNS is missing or empty")
     return _validate_runtime_dns(values)
+
+
+def _validate_selected_gpu(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value):
+        raise ControllerError(
+            "PIPELINE_SELECTED_GPU must be exactly one non-negative integer GPU index"
+        )
+    return value.lstrip("0") or "0"
+
+
+def _selected_gpu_from_environment() -> str | None:
+    if "PIPELINE_SELECTED_GPU" not in os.environ:
+        return None
+    return _validate_selected_gpu(os.environ["PIPELINE_SELECTED_GPU"])
 
 
 @dataclass(frozen=True)
@@ -225,7 +241,9 @@ class PipelineController:
         source_revision: str,
         source_identity: str,
         runtime_dns: Sequence[str] = (),
+        selected_gpu: str | None = None,
     ) -> Path:
+        selected_gpu = _validate_selected_gpu(selected_gpu)
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{7,63}", execution_id):
             raise ControllerError("Invalid execution ID")
         runtime_dns = _validate_runtime_dns(runtime_dns)
@@ -239,6 +257,14 @@ class PipelineController:
         orchestration = resolve_orchestration_config(raw.get("orchestration"))
         if not orchestration.enabled:
             raise ControllerError("The one-command controller requires orchestration.enabled=true")
+        configured_training_gpu_devices = orchestration.training_gpu_devices
+        effective_training_gpu_devices = selected_gpu or configured_training_gpu_devices
+        if selected_gpu is not None:
+            print(
+                "GPU admission override: "
+                f"configured training devices={configured_training_gpu_devices}; "
+                f"effective device={effective_training_gpu_devices}"
+            )
 
         gateway_key = _read_secret(Path("/run/pipeline-secrets/litellm_api_key"))
         if gateway_key:
@@ -265,7 +291,7 @@ class PipelineController:
         command = [
             "docker", "container", "create", "--name", training_name,
             *labels,
-            "--gpus", f"device={orchestration.training_gpu_devices}",
+            "--gpus", f"device={effective_training_gpu_devices}",
             "--mount", f"type=bind,src={layout.host_project},dst=/workspace/project,readonly",
             "--mount", (
                 f"type=bind,src={layout.host_datasets or layout.host_project},"
@@ -347,6 +373,11 @@ class PipelineController:
         _record_phase(
             metadata_path, "training", "success", execution_id=execution_id,
             image={"reference": training_image, "id": training_image_id},
+            gpu_devices={
+                "configured": configured_training_gpu_devices,
+                "effective": effective_training_gpu_devices,
+                "admission_override": selected_gpu,
+            },
         )
         training_config = resolve_training_config(raw["training"])
         validate_model_artifacts(
@@ -372,6 +403,19 @@ class PipelineController:
         )
         if not serving.enabled:
             raise ControllerError("The full deployment controller requires serving.enabled=true")
+        configured_serving_gpu_devices = (
+            serving.vllm.gpu_devices if serving.vllm is not None else None
+        )
+        if selected_gpu is not None and serving.vllm is not None:
+            serving = replace(
+                serving,
+                vllm=replace(serving.vllm, gpu_devices=selected_gpu),
+            )
+            print(
+                "GPU admission override: "
+                f"configured serving devices={configured_serving_gpu_devices}; "
+                f"effective device={selected_gpu}"
+            )
         gateway = resolve_gateway_config(raw.get("gateway"), serving=serving, run_id=result["run_id"])
         host_model_dir = _host_join(layout.host_runs, result["model_directory"], "Host model directory")
         serving_manager = self.serving_manager_factory()
@@ -435,11 +479,19 @@ class PipelineController:
             self._write_deployment_manifest(
                 run_root, execution_id, result, source_revision, source_identity,
                 training_image, training_image_id, serving, serving_result, gateway, None, "failed",
+                configured_training_gpu_devices=configured_training_gpu_devices,
+                effective_training_gpu_devices=effective_training_gpu_devices,
+                configured_serving_gpu_devices=configured_serving_gpu_devices,
+                admitted_gpu_override=selected_gpu,
             )
             raise
         manifest = self._write_deployment_manifest(
             run_root, execution_id, result, source_revision, source_identity,
             training_image, training_image_id, serving, serving_result, gateway, gateway_result, "success",
+            configured_training_gpu_devices=configured_training_gpu_devices,
+            effective_training_gpu_devices=effective_training_gpu_devices,
+            configured_serving_gpu_devices=configured_serving_gpu_devices,
+            admitted_gpu_override=selected_gpu,
         )
         self._print_success(result["run_id"], serving, gateway, manifest)
         return manifest
@@ -500,6 +552,11 @@ class PipelineController:
         source_revision: str, source_identity: str,
         training_image: str, training_image_id: str,
         serving, serving_result, gateway, gateway_result, status: str,
+        *,
+        configured_training_gpu_devices: str,
+        effective_training_gpu_devices: str,
+        configured_serving_gpu_devices: str | None,
+        admitted_gpu_override: str | None,
     ) -> Path:
         path = run_root / "deployment_manifest.json"
         value = {
@@ -517,6 +574,11 @@ class PipelineController:
                 "model_directory": training.get("model_directory"),
                 "artifact_relationship": "base_model_plus_lora_adapter",
                 "image": {"reference": training_image, "id": training_image_id},
+                "gpu_devices": {
+                    "configured": configured_training_gpu_devices,
+                    "effective": effective_training_gpu_devices,
+                    "admission_override": admitted_gpu_override,
+                },
             },
             "serving": {
                 "provider": "vllm",
@@ -534,6 +596,8 @@ class PipelineController:
                 "restart_policy": serving.restart_policy,
                 "port": serving.port,
                 "gpu_devices": serving.vllm.gpu_devices if serving.vllm else None,
+                "configured_gpu_devices": configured_serving_gpu_devices,
+                "admission_override": admitted_gpu_override,
                 "manifest": serving_result.get("manifest_path") if serving_result else None,
                 "health_check": serving_result.get("health_path") if serving_result else None,
                 "operation": (
@@ -621,6 +685,7 @@ def main() -> int:
             source_revision=os.environ.get("PIPELINE_SOURCE_REVISION", "unknown"),
             source_identity=os.environ.get("PIPELINE_SOURCE_IDENTITY", "unknown"),
             runtime_dns=_runtime_dns_from_environment(),
+            selected_gpu=_selected_gpu_from_environment(),
         )
         return 0 if manifest else 1
     except Exception as error:

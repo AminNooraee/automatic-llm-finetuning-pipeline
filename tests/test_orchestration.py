@@ -16,6 +16,8 @@ from fine_tuning_pipeline.orchestration.controller import (
     _safe_docker_error_reason,
     _safe_relative,
     _runtime_dns_from_environment,
+    _selected_gpu_from_environment,
+    _validate_selected_gpu,
     _worker_config,
 )
 from fine_tuning_pipeline.orchestration.training_worker import run_worker
@@ -253,10 +255,104 @@ class ControllerTests(unittest.TestCase):
                 serving.calls[0]["runtime_dns"], ("192.0.2.53", "2001:db8::53")
             )
             self.assertEqual(serving.calls[0]["config"].restart_policy, "unless-stopped")
+            self.assertEqual(serving.calls[0]["config"].vllm.gpu_devices, "0")
             self.assertEqual(serving.cleaned, [])
             value = json.loads(manifest.read_text(encoding="utf-8"))
             self.assertEqual(value["status"], "success")
             self.assertEqual(value["serving"]["container_id"], "serving-id")
+            self.assertEqual(value["training"]["gpu_devices"], {
+                "configured": "1", "effective": "1", "admission_override": None,
+            })
+            self.assertEqual(value["serving"]["configured_gpu_devices"], "0")
+            self.assertIsNone(value["serving"]["admission_override"])
+
+    def test_selected_gpu_overrides_training_and_serving_with_provenance(self):
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            raw = config_value()
+            raw["orchestration"]["training"]["gpu_devices"] = "0,2"
+            raw["serving"]["vllm"] = {"gpu_devices": "2,3"}
+            (root / "project" / "config.yaml").write_text(
+                json.dumps(raw), encoding="utf-8"
+            )
+            execution = "exec-12345678"
+            docker = FakeDocker(root, execution)
+            manifest = PipelineController(
+                docker=docker, serving_manager_factory=FakeServingManager
+            ).deploy(
+                execution_id=execution, config_relative="config.yaml", layout=layout,
+                training_image="trainer:test", training_image_id="sha256:trainer",
+                source_revision="revision", source_identity="revision", selected_gpu="1",
+            )
+            create = docker.calls[0]
+            self.assertEqual(create[create.index("--gpus") + 1], "device=1")
+            self.assertFalse(any("CUDA_VISIBLE_DEVICES" in item for item in create))
+            serving_config = FakeServingManager.instances[0].calls[0]["config"]
+            self.assertEqual(serving_config.vllm.gpu_devices, "1")
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(value["training"]["gpu_devices"], {
+                "configured": "0,2", "effective": "1", "admission_override": "1",
+            })
+            self.assertEqual(value["serving"]["configured_gpu_devices"], "2,3")
+            self.assertEqual(value["serving"]["gpu_devices"], "1")
+            self.assertEqual(value["serving"]["admission_override"], "1")
+
+    def test_legacy_multi_gpu_config_is_preserved_without_override(self):
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            raw = config_value()
+            raw["orchestration"]["training"]["gpu_devices"] = "0,2"
+            raw["serving"]["vllm"] = {"gpu_devices": "1,3"}
+            (root / "project" / "config.yaml").write_text(
+                json.dumps(raw), encoding="utf-8"
+            )
+            execution = "exec-12345678"
+            docker = FakeDocker(root, execution)
+            PipelineController(
+                docker=docker, serving_manager_factory=FakeServingManager
+            ).deploy(
+                execution_id=execution, config_relative="config.yaml", layout=layout,
+                training_image="trainer:test", training_image_id="sha256:trainer",
+                source_revision="revision", source_identity="revision",
+            )
+            create = docker.calls[0]
+            self.assertEqual(create[create.index("--gpus") + 1], "device=0,2")
+            self.assertEqual(
+                FakeServingManager.instances[0].calls[0]["config"].vllm.gpu_devices,
+                "1,3",
+            )
+
+    def test_invalid_selected_gpu_fails_before_any_docker_mutation(self):
+        for value in ("", "-1", "0,1", " 1", "1 ", "gpu1", "$(id)"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory(
+                dir=TESTS_DIR
+            ) as temporary:
+                root = Path(temporary)
+                layout = self._layout(root)
+                docker = FakeDocker(root, "exec-12345678")
+                with self.assertRaisesRegex(ControllerError, "PIPELINE_SELECTED_GPU"):
+                    PipelineController(
+                        docker=docker, serving_manager_factory=FakeServingManager
+                    ).deploy(
+                        execution_id="exec-12345678", config_relative="config.yaml",
+                        layout=layout, training_image="trainer:test",
+                        training_image_id="sha256:trainer", source_revision="revision",
+                        source_identity="revision", selected_gpu=value,
+                    )
+                self.assertEqual(docker.calls, [])
+
+    def test_selected_gpu_environment_is_optional_normalized_and_strict(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(_selected_gpu_from_environment())
+        with patch.dict("os.environ", {"PIPELINE_SELECTED_GPU": "001"}, clear=True):
+            self.assertEqual(_selected_gpu_from_environment(), "1")
+        self.assertEqual(_validate_selected_gpu("0"), "0")
+        self.assertEqual(_validate_selected_gpu("0" * 5000 + "1"), "1")
+        for value in ("", "-1", "0,1", " 1", "1 ", "gpu"):
+            with self.subTest(value=value), self.assertRaises(ControllerError):
+                _validate_selected_gpu(value)
 
     def test_failed_training_prevents_serving_and_removes_only_owned_trainer(self):
         with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:

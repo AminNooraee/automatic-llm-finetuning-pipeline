@@ -173,10 +173,13 @@ exit 1
         self, *, mode=None, scenario="success", reuse=False, rebuild=False,
         failure_message=None, build_dns=None,
         runtime_dns="192.0.2.55 2001:db8::55",
+        selected_gpu=None, cuda_visible_devices=None,
     ):
         for path in (self.log, self.context_log, self.evidence):
             path.unlink(missing_ok=True)
         environment = os.environ.copy()
+        environment.pop("PIPELINE_SELECTED_GPU", None)
+        environment.pop("CUDA_VISIBLE_DEVICES", None)
         environment.update({
             "PATH": f"{self.root / 'fake-bin'}{os.pathsep}{environment['PATH']}",
             "FAKE_DOCKER_LOG": self.log.as_posix(),
@@ -198,6 +201,10 @@ exit 1
             environment["PIPELINE_DOCKER_BUILD_DNS"] = build_dns
         if runtime_dns is not None:
             environment["PIPELINE_DOCKER_RUNTIME_DNS"] = runtime_dns
+        if selected_gpu is not None:
+            environment["PIPELINE_SELECTED_GPU"] = selected_gpu
+        if cuda_visible_devices is not None:
+            environment["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
         command = [SHELL, (self.root / "scripts/run_pipeline.sh").as_posix()]
         if rebuild:
             command.append("--rebuild")
@@ -235,6 +242,43 @@ exit 1
         self.assertEqual(result.returncode, 2)
         self.assertIn("must be one of: auto, default, host, host-dns", result.stderr)
         self.assertEqual(self.commands(), [])
+
+    def test_selected_gpu_absent_is_not_forwarded(self):
+        result = self.run_launcher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = [line for line in self.commands() if line.startswith("run ")]
+        self.assertEqual(len(runtime), 1)
+        self.assertNotIn("PIPELINE_SELECTED_GPU", runtime[0])
+
+    def test_valid_selected_gpu_is_forwarded_without_cuda_visible_devices(self):
+        result = self.run_launcher(selected_gpu="1", cuda_visible_devices="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = [line for line in self.commands() if line.startswith("run ")]
+        self.assertEqual(len(runtime), 1)
+        self.assertIn("--env PIPELINE_SELECTED_GPU=1", runtime[0])
+        self.assertNotIn("CUDA_VISIBLE_DEVICES", runtime[0])
+
+    def test_cuda_visible_devices_alone_is_not_nested_gpu_authority(self):
+        result = self.run_launcher(cuda_visible_devices="7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = [line for line in self.commands() if line.startswith("run ")]
+        self.assertEqual(len(runtime), 1)
+        self.assertNotIn("PIPELINE_SELECTED_GPU", runtime[0])
+        self.assertNotIn("CUDA_VISIBLE_DEVICES", runtime[0])
+
+    def test_invalid_selected_gpu_is_rejected_before_docker_access(self):
+        marker = self.root / "gpu-selection-owned"
+        invalid = (
+            "", "-1", "0,1", " 1", "1 ", "1 2", "gpu1",
+            f"1;touch {marker.as_posix()}", f"$(touch {marker.as_posix()})",
+        )
+        for value in invalid:
+            with self.subTest(value=value):
+                result = self.run_launcher(selected_gpu=value)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("PIPELINE_SELECTED_GPU", result.stderr)
+                self.assertEqual(self.commands(), [])
+                self.assertFalse(marker.exists())
 
     def test_auto_dns_failure_retries_each_image_once_and_continues(self):
         result = self.run_launcher(scenario="dns_then_success")

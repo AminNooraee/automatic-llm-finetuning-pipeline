@@ -25,6 +25,17 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
+SELECTED_GPU_IS_SET=0
+if [ "${PIPELINE_SELECTED_GPU+x}" = x ]; then
+    case "$PIPELINE_SELECTED_GPU" in
+        ''|*[!0-9]*)
+            echo "PIPELINE_SELECTED_GPU must be exactly one non-negative integer GPU index." >&2
+            exit 2
+            ;;
+    esac
+    SELECTED_GPU_IS_SET=1
+fi
+
 command -v git >/dev/null 2>&1 || { echo "Git is required." >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || { echo "Docker CLI is required." >&2; exit 1; }
 docker info >/dev/null 2>&1 || {
@@ -354,6 +365,9 @@ set -- docker run --rm --read-only --network host \
     --env "PIPELINE_SOURCE_REVISION=$SOURCE_REVISION" \
     --env "PIPELINE_SOURCE_IDENTITY=$SOURCE_IDENTITY"
 set -- "$@" --env "PIPELINE_WORKER_UID=$HOST_UID" --env "PIPELINE_WORKER_GID=$HOST_GID"
+if [ "$SELECTED_GPU_IS_SET" -eq 1 ]; then
+    set -- "$@" --env "PIPELINE_SELECTED_GPU=$PIPELINE_SELECTED_GPU"
+fi
 if [ -n "${LITELLM_BASE_URL-}" ]; then
     set -- "$@" --env LITELLM_BASE_URL
 fi

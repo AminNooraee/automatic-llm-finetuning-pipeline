@@ -147,6 +147,16 @@ class DockerBackendTests(unittest.TestCase):
         self.assertFalse(any(item in {"stop", "rm", "kill"} for item in command))
         self.assertEqual(command[command.index("--restart") + 1], "no")
         self.assertIn("fine-tuning-pipeline.managed=true", command)
+        self.assertEqual(command[command.index("--gpus") + 1], "device=0")
+
+    def test_command_uses_the_exact_resolved_gpu_devices(self):
+        config = serving_config(vllm={"gpu_devices": "1"})
+        request = ServingLaunchRequest(
+            "run-1", "Org/Base-Model", "abc123", Path("adapter"), 64, config
+        )
+        command = build_vllm_docker_command(request)
+        self.assertEqual(command[command.index("--gpus") + 1], "device=1")
+        self.assertFalse(any("CUDA_VISIBLE_DEVICES" in item for item in command))
 
     def test_command_omits_revision_only_when_resolution_is_unavailable(self):
         self.assertNotIn("--revision", build_vllm_docker_command(self.request(None)))
