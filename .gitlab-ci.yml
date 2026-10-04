@@ -1,5 +1,6 @@
 stages:
   - smoke
+  - admission-validation
 
 variables:
   GPU_RUNNER_TAG: "finetune-gpu"
@@ -28,3 +29,18 @@ gpu-runner-smoke-test:
     - docker version --format '{{.Server.Version}}'
 
     - echo "=== RUNNER SMOKE TEST PASSED ==="
+
+gpu-admission-validation:
+  stage: admission-validation
+
+  tags:
+    - $GPU_RUNNER_TAG
+
+  variables:
+    GPU_DEVICE: "auto"
+
+  when: manual
+
+  script:
+    - 'test -n "${GPU_MIN_FREE_MIB:-}" || { echo "GPU_MIN_FREE_MIB must be supplied explicitly." >&2; exit 1; }'
+    - sh scripts/gpu_preflight.sh
