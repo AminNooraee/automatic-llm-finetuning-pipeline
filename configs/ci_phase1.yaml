@@ -1,0 +1,76 @@
+# Portable Phase-1 GPU pipeline configuration for CI-provided infrastructure.
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+
+dataset:
+  path: ../examples/datasets/alpaca_demo.json
+  name: bundled_synthetic_demo
+  source_format: auto
+  format: auto
+
+training:
+  method: lora
+  epochs: 1
+  learning_rate: 0.0002
+  batch_size: 1
+  precision: bf16
+  gradient_checkpointing: false
+  cutoff_len: 2048
+  save_steps: 10
+  logging_steps: 1
+  lora:
+    rank: 8
+    alpha: 16
+    dropout: 0.0
+
+orchestration:
+  enabled: true
+  training:
+    # PIPELINE_SELECTED_GPU is authoritative when supplied by CI.
+    gpu_devices: "0"
+  cleanup_on_failure: true
+
+serving:
+  enabled: true
+  backend: vllm
+  runtime: docker
+  bind_host: 0.0.0.0
+  advertise_host: ${SERVING_ADVERTISE_HOST}
+  port: 8101
+  base_model_name: auto
+  fine_tuned_model_name: auto
+  container_name: auto
+  restart_policy: unless-stopped
+  vllm:
+    image: vllm/vllm-openai:v0.11.0
+    gpu_devices: "0"
+    gpu_memory_utilization: 0.15
+    max_model_len: 4096
+    max_num_seqs: 2
+  health_check:
+    enabled: true
+    timeout_seconds: 180
+    interval_seconds: 2
+
+gateway:
+  enabled: true
+  provider: litellm
+  base_url: ${LITELLM_BASE_URL}
+  api_key: ${LITELLM_API_KEY}
+  allow_insecure_http: true
+  allow_local_backend: false
+  registration:
+    mode: dynamic_db
+    base_model_name: auto
+    fine_tuned_model_name: auto
+  timeout_seconds: 60
+  health_check:
+    enabled: true
+    verify_models: true
+    verify_inference: true
+
+output:
+  runs_path: ../runs
+
+observability:
+  console_verbosity: concise

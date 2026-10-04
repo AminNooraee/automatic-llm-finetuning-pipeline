@@ -39,7 +39,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         names = (
             "config.yaml", "qwen_example.yaml", "llama_example.yaml",
             "huggingface_dataset_example.yaml", "serving_gateway_example.yaml",
-            "full_pipeline_example.yaml",
+            "full_pipeline_example.yaml", "ci_phase1.yaml",
         )
         for name in names:
             with self.subTest(config=name):
@@ -57,6 +57,17 @@ class RepositoryLayoutTests(unittest.TestCase):
                     dataset = resolve_config_path(config["dataset"]["path"], path.parent)
                     self.assertEqual(dataset, REPOSITORY_ROOT / "examples" / "datasets" / "alpaca_demo.json")
                     self.assertTrue(dataset.is_file())
+
+    def test_phase1_ci_config_uses_only_portable_environment_references(self):
+        config = load_config(REPOSITORY_ROOT / "configs" / "ci_phase1.yaml")
+        self.assertEqual(config["model"]["name"], "Qwen/Qwen2.5-0.5B-Instruct")
+        self.assertEqual(config["training"]["method"], "lora")
+        self.assertEqual(config["training"]["epochs"], 1)
+        self.assertTrue(config["orchestration"]["enabled"])
+        self.assertEqual(config["serving"]["advertise_host"], "${SERVING_ADVERTISE_HOST}")
+        self.assertEqual(config["gateway"]["base_url"], "${LITELLM_BASE_URL}")
+        self.assertEqual(config["gateway"]["api_key"], "${LITELLM_API_KEY}")
+        self.assertTrue(config["gateway"]["allow_insecure_http"])
 
     def test_installed_import_and_default_config_ignore_working_directory(self):
         environment = os.environ.copy()

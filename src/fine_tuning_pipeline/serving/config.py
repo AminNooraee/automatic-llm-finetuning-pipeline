@@ -8,6 +8,8 @@ from math import isfinite
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from ..security import resolve_environment_value
+
 
 class ServingConfigError(ValueError):
     """Raised when automatic serving cannot be configured safely."""
@@ -77,6 +79,7 @@ def resolve_serving_config(
     run_id: str,
     base_model: str,
     training_method: str,
+    environment: Mapping[str, str] | None = None,
 ) -> ServingConfig:
     if raw is None:
         return ServingConfig(enabled=False)
@@ -94,8 +97,16 @@ def resolve_serving_config(
     backend = _choice(section.get("backend", "vllm"), "serving.backend", {"vllm"})
     runtime = _choice(section.get("runtime", "docker"), "serving.runtime", {"docker"})
     bind_host = _host(section.get("bind_host", "0.0.0.0"), "serving.bind_host", wildcard=True)
+    try:
+        advertise_host_value = resolve_environment_value(
+            section.get("advertise_host", "localhost"),
+            "serving.advertise_host",
+            environment=environment,
+        )
+    except ValueError as error:
+        raise ServingConfigError(str(error)) from None
     advertise_host = _host(
-        section.get("advertise_host", "localhost"), "serving.advertise_host", wildcard=False
+        advertise_host_value, "serving.advertise_host", wildcard=False
     )
     port = _integer(section.get("port", 8101), "serving.port", minimum=1, maximum=65535)
 
@@ -256,6 +267,8 @@ def _host(value: Any, label: str, *, wildcard: bool) -> str:
     if any(character.isspace() for character in host) or any(item in host for item in ("/", "?", "#", "@")):
         raise ServingConfigError(f"{label} must be a hostname or IP address without a URL scheme or path")
     candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    if not wildcard and candidate in {"0.0.0.0", "::", "*"}:
+        raise ServingConfigError(f"{label} must be reachable and cannot be a wildcard address")
     try:
         parsed = urlsplit(f"//{host}")
         embedded_port = parsed.port
@@ -265,6 +278,4 @@ def _host(value: Any, label: str, *, wildcard: bool) -> str:
         raise ServingConfigError(f"{label} must not include a port")
     if candidate == "*":
         raise ServingConfigError(f"{label} must be a hostname or IP address")
-    if not wildcard and candidate in {"0.0.0.0", "::", "*"}:
-        raise ServingConfigError(f"{label} must be reachable and cannot be a wildcard address")
     return candidate

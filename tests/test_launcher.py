@@ -174,12 +174,14 @@ exit 1
         failure_message=None, build_dns=None,
         runtime_dns="192.0.2.55 2001:db8::55",
         selected_gpu=None, cuda_visible_devices=None,
+        serving_advertise_host=None,
     ):
         for path in (self.log, self.context_log, self.evidence):
             path.unlink(missing_ok=True)
         environment = os.environ.copy()
         environment.pop("PIPELINE_SELECTED_GPU", None)
         environment.pop("CUDA_VISIBLE_DEVICES", None)
+        environment.pop("SERVING_ADVERTISE_HOST", None)
         environment.update({
             "PATH": f"{self.root / 'fake-bin'}{os.pathsep}{environment['PATH']}",
             "FAKE_DOCKER_LOG": self.log.as_posix(),
@@ -188,6 +190,7 @@ exit 1
             "FAKE_PROJECT": self.root.as_posix(),
             "FAKE_BUILD_SCENARIO": scenario,
             "FAKE_REUSE": "1" if reuse else "0",
+            "UNRELATED_RUNNER_VALUE": "must-not-be-forwarded",
             "PIPELINE_RUNS_DIR": (self.root / "runtime/runs").as_posix(),
             "PIPELINE_HF_CACHE_DIR": (self.root / "runtime/cache").as_posix(),
             "PIPELINE_STATE_DIR": (self.root / "runtime/state").as_posix(),
@@ -205,6 +208,8 @@ exit 1
             environment["PIPELINE_SELECTED_GPU"] = selected_gpu
         if cuda_visible_devices is not None:
             environment["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+        if serving_advertise_host is not None:
+            environment["SERVING_ADVERTISE_HOST"] = serving_advertise_host
         command = [SHELL, (self.root / "scripts/run_pipeline.sh").as_posix()]
         if rebuild:
             command.append("--rebuild")
@@ -265,6 +270,24 @@ exit 1
         self.assertEqual(len(runtime), 1)
         self.assertNotIn("PIPELINE_SELECTED_GPU", runtime[0])
         self.assertNotIn("CUDA_VISIBLE_DEVICES", runtime[0])
+
+    def test_serving_advertise_host_is_forwarded_without_unrelated_environment(self):
+        result = self.run_launcher(serving_advertise_host="model-worker.example")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        runtime = [line for line in self.commands() if line.startswith("run ")]
+        self.assertEqual(len(runtime), 1)
+        self.assertIn("--env SERVING_ADVERTISE_HOST", runtime[0])
+        self.assertNotIn("UNRELATED_RUNNER_VALUE", runtime[0])
+
+    def test_serving_advertise_host_unset_or_empty_is_not_forwarded(self):
+        for value in (None, ""):
+            with self.subTest(value=value):
+                result = self.run_launcher(serving_advertise_host=value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                runtime = [line for line in self.commands() if line.startswith("run ")]
+                self.assertEqual(len(runtime), 1)
+                self.assertNotIn("SERVING_ADVERTISE_HOST", runtime[0])
+                self.assertNotIn("UNRELATED_RUNNER_VALUE", runtime[0])
 
     def test_invalid_selected_gpu_is_rejected_before_docker_access(self):
         marker = self.root / "gpu-selection-owned"

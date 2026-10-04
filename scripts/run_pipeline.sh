@@ -368,6 +368,9 @@ set -- "$@" --env "PIPELINE_WORKER_UID=$HOST_UID" --env "PIPELINE_WORKER_GID=$HO
 if [ "$SELECTED_GPU_IS_SET" -eq 1 ]; then
     set -- "$@" --env "PIPELINE_SELECTED_GPU=$PIPELINE_SELECTED_GPU"
 fi
+if [ -n "${SERVING_ADVERTISE_HOST-}" ]; then
+    set -- "$@" --env SERVING_ADVERTISE_HOST
+fi
 if [ -n "${LITELLM_BASE_URL-}" ]; then
     set -- "$@" --env LITELLM_BASE_URL
 fi

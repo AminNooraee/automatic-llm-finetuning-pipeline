@@ -23,7 +23,7 @@ from fine_tuning_pipeline.serving.manager import ServingManager
 TESTS_DIR = Path(__file__).resolve().parent
 
 
-def serving_config(**updates):
+def serving_config(*, environment=None, **updates):
     raw = {
         "enabled": True,
         "backend": "vllm",
@@ -45,7 +45,8 @@ def serving_config(**updates):
     }
     raw.update(updates)
     return resolve_serving_config(
-        raw, run_id="20260927_120000_example", base_model="Org/Base-Model", training_method="lora"
+        raw, run_id="20260927_120000_example", base_model="Org/Base-Model",
+        training_method="lora", environment=environment,
     )
 
 
@@ -117,6 +118,53 @@ class ServingConfigTests(unittest.TestCase):
     def test_advertise_host_builds_provider_neutral_url(self):
         config = serving_config(advertise_host="10.20.30.40", port=9000)
         self.assertEqual(config.base_url, "http://10.20.30.40:9000/v1")
+
+    def test_advertise_host_resolves_exact_environment_reference(self):
+        config = serving_config(
+            advertise_host="${SERVING_ADVERTISE_HOST}",
+            environment={"SERVING_ADVERTISE_HOST": "model-worker.example"},
+        )
+        self.assertEqual(config.advertise_host, "model-worker.example")
+        self.assertEqual(config.base_url, "http://model-worker.example:8101/v1")
+
+    def test_advertise_host_missing_environment_variable_is_rejected(self):
+        with self.assertRaisesRegex(
+            ServingConfigError,
+            "Required environment variable SERVING_ADVERTISE_HOST.*serving.advertise_host",
+        ):
+            serving_config(
+                advertise_host="${SERVING_ADVERTISE_HOST}", environment={}
+            )
+
+    def test_advertise_host_empty_environment_variable_is_rejected(self):
+        with self.assertRaisesRegex(
+            ServingConfigError,
+            "Required environment variable SERVING_ADVERTISE_HOST.*serving.advertise_host",
+        ):
+            serving_config(
+                advertise_host="${SERVING_ADVERTISE_HOST}",
+                environment={"SERVING_ADVERTISE_HOST": ""},
+            )
+
+    def test_advertise_host_invalid_resolved_value_is_rejected(self):
+        for value in ("bad host", "model-worker.example:8101", "https://model-worker.example"):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ServingConfigError, "serving.advertise_host"
+            ):
+                serving_config(
+                    advertise_host="${SERVING_ADVERTISE_HOST}",
+                    environment={"SERVING_ADVERTISE_HOST": value},
+                )
+
+    def test_advertise_host_resolved_wildcard_is_rejected(self):
+        for value in ("0.0.0.0", "::", "*"):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ServingConfigError, "cannot be a wildcard|must be a hostname"
+            ):
+                serving_config(
+                    advertise_host="${SERVING_ADVERTISE_HOST}",
+                    environment={"SERVING_ADVERTISE_HOST": value},
+                )
 
 
 class DockerBackendTests(unittest.TestCase):
