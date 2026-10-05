@@ -149,7 +149,7 @@ class ResourceEstimatorTests(unittest.TestCase):
             },
         )
         self.assertTrue(policy.enabled)
-        self.assertEqual(estimate.required_training_mib, 4897)
+        self.assertEqual(estimate.required_training_mib, 6065)
         self.assertEqual(estimate.serving_memory_utilization_bps, 1500)
         self.assertEqual(serving.port_range, (8101, 8199))
 
