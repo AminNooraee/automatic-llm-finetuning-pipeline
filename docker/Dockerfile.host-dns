@@ -52,6 +52,7 @@ RUN --mount=type=bind,from=pipeline_dns,source=resolv.conf,target=/etc/resolv.co
 # Editable installation preserves the existing /app/configs default contract.
 COPY README.md LICENSE pyproject.toml requirements.txt ./
 COPY .dockerignore ./
+COPY .gitlab-ci.yml ./
 COPY docker/ ./docker/
 COPY src/fine_tuning_pipeline/ ./src/fine_tuning_pipeline/
 COPY configs/ ./configs/

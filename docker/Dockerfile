@@ -48,6 +48,7 @@ RUN python3 -m venv /opt/venv \
 # Editable installation preserves the existing /app/configs default contract.
 COPY README.md LICENSE pyproject.toml requirements.txt ./
 COPY .dockerignore ./
+COPY .gitlab-ci.yml ./
 COPY docker/ ./docker/
 COPY src/fine_tuning_pipeline/ ./src/fine_tuning_pipeline/
 COPY configs/ ./configs/

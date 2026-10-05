@@ -2,6 +2,7 @@
 # Keep this file at the repository root, even with -f docker/Dockerfile.
 **
 !.dockerignore
+!.gitlab-ci.yml
 !README.md
 !LICENSE
 !pyproject.toml
