@@ -3,8 +3,8 @@ model:
   name: Qwen/Qwen2.5-0.5B-Instruct
 
 dataset:
-  path: ../examples/datasets/alpaca_demo.json
-  name: bundled_synthetic_demo
+  path: phase1_train.json
+  name: phase1_train
   source_format: auto
   format: auto
 

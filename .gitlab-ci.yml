@@ -1,9 +1,11 @@
 stages:
   - smoke
   - admission-validation
+  - finetune
 
 variables:
   GPU_RUNNER_TAG: "finetune-gpu"
+  PHASE1_GPU_RUNNER_TAG: "worker-server53"
 
 gpu-runner-smoke-test:
   stage: smoke
@@ -48,3 +50,60 @@ gpu-admission-validation:
   script:
     - 'test -n "${GPU_MIN_FREE_MIB:-}" || { echo "GPU_MIN_FREE_MIB must be supplied explicitly." >&2; exit 1; }'
     - sh scripts/gpu_preflight.sh
+
+phase1-finetune:
+  stage: finetune
+  resource_group: phase1-finetune
+
+  tags:
+    - $PHASE1_GPU_RUNNER_TAG
+
+  variables:
+    PIPELINE_CONFIG: "configs/ci_phase1.yaml"
+    GPU_DEVICE: "auto"
+    GPU_MIN_FREE_MIB: "16000"
+    GPU_PREFLIGHT_ENV_FILE: "$CI_PROJECT_DIR/.phase1-gpu.env"
+    PHASE1_MANIFEST_MARKER: "$CI_PROJECT_DIR/.phase1-manifest-marker"
+
+  when: manual
+  allow_failure: false
+
+  script:
+    - 'test -n "${SERVING_ADVERTISE_HOST:-}" || { echo "SERVING_ADVERTISE_HOST must be supplied explicitly." >&2; exit 1; }'
+    - 'test -n "${PIPELINE_DATASETS_DIR:-}" || { echo "PIPELINE_DATASETS_DIR must be supplied explicitly." >&2; exit 1; }'
+    - 'test -n "${PIPELINE_RUNS_DIR:-}" || { echo "PIPELINE_RUNS_DIR must be supplied explicitly." >&2; exit 1; }'
+    - 'test -n "${PIPELINE_HF_CACHE_DIR:-}" || { echo "PIPELINE_HF_CACHE_DIR must be supplied explicitly." >&2; exit 1; }'
+    - 'test -n "${PIPELINE_STATE_DIR:-}" || { echo "PIPELINE_STATE_DIR must be supplied explicitly." >&2; exit 1; }'
+    - 'test -n "${LITELLM_BASE_URL:-}" || { echo "LITELLM_BASE_URL must be supplied explicitly." >&2; exit 1; }'
+    - 'test -n "${LITELLM_API_KEY:-}" || { echo "LITELLM_API_KEY must be supplied explicitly." >&2; exit 1; }'
+    - 'test -f "$PIPELINE_DATASETS_DIR/phase1_train.json" && test -r "$PIPELINE_DATASETS_DIR/phase1_train.json" || { echo "Dataset must be a readable regular file: $PIPELINE_DATASETS_DIR/phase1_train.json" >&2; exit 1; }'
+    - |
+      for directory in "$PIPELINE_RUNS_DIR" "$PIPELINE_HF_CACHE_DIR" "$PIPELINE_STATE_DIR"; do
+        test -d "$directory" || { echo "Required directory does not exist: $directory" >&2; exit 1; }
+        test -w "$directory" || { echo "Required directory is not writable: $directory" >&2; exit 1; }
+      done
+    - |
+      sh scripts/gpu_preflight.sh
+      . "$GPU_PREFLIGHT_ENV_FILE"
+      export PIPELINE_SELECTED_GPU
+      touch "$PHASE1_MANIFEST_MARKER"
+      sh scripts/run_pipeline.sh "$PIPELINE_CONFIG"
+    - |
+      manifests=$(find "$PIPELINE_RUNS_DIR" -type f -name gateway_manifest.json -newer "$PHASE1_MANIFEST_MARKER" -print)
+      manifest_count=$(printf '%s\n' "$manifests" | awk 'NF { count++ } END { print count + 0 }')
+      case "$manifest_count" in
+        0) echo "No new gateway_manifest.json was created by this job." >&2; exit 1 ;;
+        1) ;;
+        *) echo "Expected exactly one new gateway_manifest.json, found $manifest_count." >&2; exit 1 ;;
+      esac
+      mkdir -p "$CI_PROJECT_DIR/ci_artifacts/project1"
+      cp "$manifests" "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json"
+
+  after_script:
+    - rm -f "$GPU_PREFLIGHT_ENV_FILE" "$PHASE1_MANIFEST_MARKER"
+
+  artifacts:
+    paths:
+      - ci_artifacts/project1/gateway_manifest.json
+    expire_in: 30 days
+    when: on_success
