@@ -64,6 +64,7 @@ class GpuPreflightTests(unittest.TestCase):
         nvidia_runtime: bool = True, gpu_output: str = "0, 12000\n",
         nvidia_works: bool = True, env_file: Path | None = None,
         isolated_path: bool = False,
+        estimated: str | None = None, serving_utilization_bps: str = "1500",
     ) -> subprocess.CompletedProcess[str]:
         if nvidia:
             self._nvidia(works=nvidia_works)
@@ -75,9 +76,15 @@ class GpuPreflightTests(unittest.TestCase):
             "FAKE_DOCKER_LOG": str(self.docker_log),
             "FAKE_NVIDIA_OUTPUT": gpu_output,
         })
-        for key in ("GPU_MIN_FREE_MIB", "GPU_DEVICE", "GPU_PREFLIGHT_ENV_FILE"):
+        for key in (
+            "GPU_MIN_FREE_MIB", "GPU_DEVICE", "GPU_PREFLIGHT_ENV_FILE",
+            "GPU_ESTIMATED_TRAINING_MIB", "GPU_SERVING_MEMORY_UTILIZATION_BPS",
+        ):
             environment.pop(key, None)
-        if minimum is not None:
+        if estimated is not None:
+            environment["GPU_ESTIMATED_TRAINING_MIB"] = estimated
+            environment["GPU_SERVING_MEMORY_UTILIZATION_BPS"] = serving_utilization_bps
+        elif minimum is not None:
             environment["GPU_MIN_FREE_MIB"] = minimum
         if device is not None:
             environment["GPU_DEVICE"] = device
@@ -164,6 +171,45 @@ class GpuPreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Required VRAM: 12000 MiB", result.stdout)
         self.assertIn("GPU preflight passed", result.stdout)
+
+    def test_estimated_admission_selects_best_eligible_gpu(self):
+        result = self.run_preflight(
+            estimated="5000",
+            gpu_output="0, 11000, 80000\n1, 8000, 24000\n2, 10000, 24000\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Selected GPU: 2", result.stdout)
+        self.assertIn("Estimated required VRAM: 5000 MiB", result.stdout)
+
+    def test_estimated_admission_failure_lists_every_gpu_and_reason(self):
+        result = self.run_preflight(
+            estimated="5000",
+            gpu_output="0, 11000, 80000\n1, 4000, 24000\n",
+        )
+        self.assert_failed_with(
+            result, "No GPU satisfies the estimated training/serving VRAM requirements."
+        )
+        self.assertIn("GPU 0: 11000 MiB free", result.stderr)
+        self.assertIn(
+            "GPU 0 rejected: 11000 MiB free; 12000 MiB estimated required",
+            result.stderr,
+        )
+        self.assertIn(
+            "GPU 1 rejected: 4000 MiB free; 5000 MiB estimated required",
+            result.stderr,
+        )
+
+    def test_estimated_admission_env_records_effective_requirement(self):
+        env_file = self.root / "estimated.env"
+        result = self.run_preflight(
+            estimated="5000", gpu_output="3, 9000, 24000\n", env_file=env_file
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            env_file.read_text(encoding="utf-8"),
+            "PIPELINE_SELECTED_GPU=3\nCUDA_VISIBLE_DEVICES=3\n"
+            "PIPELINE_ESTIMATED_REQUIRED_VRAM_MIB=5000\n",
+        )
 
     def test_env_output_contains_selected_gpu_and_has_safe_permissions(self):
         env_file = self.root / "admission.env"

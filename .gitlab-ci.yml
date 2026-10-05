@@ -60,8 +60,8 @@ phase1-finetune:
 
   variables:
     PIPELINE_CONFIG: "configs/ci_phase1.yaml"
+    PIPELINE_RESOURCE_PREFLIGHT: "1"
     GPU_DEVICE: "auto"
-    GPU_MIN_FREE_MIB: "16000"
     GPU_PREFLIGHT_ENV_FILE: "$CI_PROJECT_DIR/.phase1-gpu.env"
     PHASE1_MANIFEST_MARKER: "$CI_PROJECT_DIR/.phase1-manifest-marker"
 
@@ -83,9 +83,6 @@ phase1-finetune:
         test -w "$directory" || { echo "Required directory is not writable: $directory" >&2; exit 1; }
       done
     - |
-      sh scripts/gpu_preflight.sh
-      . "$GPU_PREFLIGHT_ENV_FILE"
-      export PIPELINE_SELECTED_GPU
       touch "$PHASE1_MANIFEST_MARKER"
       sh scripts/run_pipeline.sh "$PIPELINE_CONFIG"
     - |

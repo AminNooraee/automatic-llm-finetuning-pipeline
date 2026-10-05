@@ -20,6 +20,7 @@ from ..artifact_validator import read_lora_adapter_metadata, validate_model_arti
 from ..gateway.config import resolve_gateway_config
 from ..gateway.manager import GatewayManager
 from ..security import redact_data, redact_text
+from ..resource_preflight import port_is_available
 from ..serving.config import resolve_serving_config
 from ..serving.manager import ServingManager
 from ..training_config import resolve_training_config
@@ -254,6 +255,34 @@ class PipelineController:
         raw = yaml.safe_load(controller_config.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ControllerError("Configuration must be a YAML mapping")
+        gateway_key = _read_secret(Path("/run/pipeline-secrets/litellm_api_key"))
+        if gateway_key:
+            os.environ["LITELLM_API_KEY"] = gateway_key
+        model = raw.get("model")
+        if not isinstance(model, Mapping) or not isinstance(model.get("name"), str):
+            raise ControllerError("model.name must be a non-empty string")
+        model_name = model["name"].strip()
+        if not model_name:
+            raise ControllerError("model.name must be a non-empty string")
+        training_config = resolve_training_config(raw.get("training"))
+        prevalidated_serving = resolve_serving_config(
+            raw.get("serving"),
+            run_id=execution_id,
+            base_model=model_name,
+            training_method=training_config.method,
+        )
+        if not prevalidated_serving.enabled:
+            raise ControllerError("The full deployment controller requires serving.enabled=true")
+        resolve_gateway_config(
+            raw.get("gateway"), serving=prevalidated_serving, run_id=execution_id
+        )
+        if prevalidated_serving.port_range is not None and not port_is_available(
+            prevalidated_serving.bind_host, prevalidated_serving.port
+        ):
+            raise ControllerError(
+                f"Selected serving port {prevalidated_serving.port} is no longer available; "
+                "training was not started and no existing service was modified"
+            )
         orchestration = resolve_orchestration_config(raw.get("orchestration"))
         if not orchestration.enabled:
             raise ControllerError("The one-command controller requires orchestration.enabled=true")
@@ -265,10 +294,6 @@ class PipelineController:
                 f"configured training devices={configured_training_gpu_devices}; "
                 f"effective device={effective_training_gpu_devices}"
             )
-
-        gateway_key = _read_secret(Path("/run/pipeline-secrets/litellm_api_key"))
-        if gateway_key:
-            os.environ["LITELLM_API_KEY"] = gateway_key
 
         execution_dir = layout.controller_state / "executions" / execution_id
         execution_dir.mkdir(parents=True, exist_ok=False)
@@ -379,7 +404,6 @@ class PipelineController:
                 "admission_override": selected_gpu,
             },
         )
-        training_config = resolve_training_config(raw["training"])
         validate_model_artifacts(
             model_dir,
             training_config.method,

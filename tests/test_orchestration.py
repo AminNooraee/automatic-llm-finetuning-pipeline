@@ -343,6 +343,95 @@ class ControllerTests(unittest.TestCase):
                     )
                 self.assertEqual(docker.calls, [])
 
+    def test_unavailable_selected_port_fails_before_training_container_mutation(self):
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            raw = config_value()
+            raw["serving"].update({
+                "port": "auto", "port_range": {"start": 8101, "end": 8199}
+            })
+            (root / "project" / "config.yaml").write_text(
+                json.dumps(raw), encoding="utf-8"
+            )
+            docker = FakeDocker(root, "exec-12345678")
+            with patch.dict(
+                "os.environ", {"PIPELINE_SELECTED_PORT": "8107"}, clear=True
+            ), patch(
+                "fine_tuning_pipeline.orchestration.controller.port_is_available",
+                return_value=False,
+            ), self.assertRaisesRegex(ControllerError, "training was not started"):
+                PipelineController(
+                    docker=docker, serving_manager_factory=FakeServingManager
+                ).deploy(
+                    execution_id="exec-12345678", config_relative="config.yaml",
+                    layout=layout, training_image="trainer:test",
+                    training_image_id="sha256:trainer", source_revision="revision",
+                    source_identity="revision",
+                )
+            self.assertEqual(docker.calls, [])
+            self.assertEqual(FakeServingManager.instances, [])
+
+    def test_fixed_port_ignores_ambient_selected_port_for_admission_recheck(self):
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            execution = "exec-12345678"
+            docker = FakeDocker(root, execution)
+            with patch.dict(
+                "os.environ", {"PIPELINE_SELECTED_PORT": "8199"}, clear=True
+            ), patch(
+                "fine_tuning_pipeline.orchestration.controller.port_is_available",
+                return_value=False,
+            ) as checker:
+                PipelineController(
+                    docker=docker, serving_manager_factory=FakeServingManager
+                ).deploy(
+                    execution_id=execution,
+                    config_relative="config.yaml",
+                    layout=layout,
+                    training_image="trainer:test",
+                    training_image_id="sha256:trainer",
+                    source_revision="revision",
+                    source_identity="revision",
+                )
+            checker.assert_not_called()
+            serving = FakeServingManager.instances[0].calls[0]["config"]
+            self.assertEqual(serving.port, 8101)
+            self.assertIsNone(serving.port_range)
+
+    def test_selected_port_reaches_serving_and_deployment_manifest(self):
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            raw = config_value()
+            raw["serving"].update({
+                "port": "auto", "port_range": {"start": 8101, "end": 8199}
+            })
+            (root / "project" / "config.yaml").write_text(
+                json.dumps(raw), encoding="utf-8"
+            )
+            execution = "exec-12345678"
+            docker = FakeDocker(root, execution)
+            with patch.dict(
+                "os.environ", {"PIPELINE_SELECTED_PORT": "8107"}, clear=True
+            ), patch(
+                "fine_tuning_pipeline.orchestration.controller.port_is_available",
+                return_value=True,
+            ):
+                manifest = PipelineController(
+                    docker=docker, serving_manager_factory=FakeServingManager
+                ).deploy(
+                    execution_id=execution, config_relative="config.yaml", layout=layout,
+                    training_image="trainer:test", training_image_id="sha256:trainer",
+                    source_revision="revision", source_identity="revision",
+                )
+            serving = FakeServingManager.instances[0].calls[0]["config"]
+            self.assertEqual(serving.port, 8107)
+            self.assertEqual(serving.base_url, "http://model-server.example:8107/v1")
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(value["serving"]["base_url"], serving.base_url)
+
     def test_selected_gpu_environment_is_optional_normalized_and_strict(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertIsNone(_selected_gpu_from_environment())
@@ -454,12 +543,37 @@ class ControllerTests(unittest.TestCase):
 
 
 class LauncherStaticTests(unittest.TestCase):
+    def test_unified_preflight_order_precedes_controller_and_training(self):
+        text = (TESTS_DIR.parent / "scripts" / "run_pipeline.sh").read_text(
+            encoding="utf-8"
+        )
+        estimate = text.index(
+            "    run_resource_preflight_helper estimate none estimate.env"
+        )
+        gpu = text.index(
+            '    GPU_PREFLIGHT_ENV_FILE=$selected_gpu_env sh "$PROJECT_DIR/scripts/gpu_preflight.sh"',
+            estimate,
+        )
+        port = text.index(
+            "    run_resource_preflight_helper select-port host port.env", gpu
+        )
+        controller = text.index(
+            "set -- docker run --rm --read-only --network host \\", port
+        )
+        self.assertLess(estimate, gpu)
+        self.assertLess(gpu, port)
+        self.assertLess(port, controller)
+
     def test_launcher_requires_no_host_python_and_keeps_secrets_out_of_arguments(self):
         text = (TESTS_DIR.parent / "scripts" / "run_pipeline.sh").read_text(encoding="utf-8")
         self.assertIn("docker info", text)
         self.assertIn("fine-tuning-pipeline.source-identity", text)
         self.assertIn("--rebuild", text)
-        self.assertNotIn("python ", text.lower())
+        self.assertNotIn("command -v python", text.lower())
+        self.assertIn(
+            '"$CONTROLLER_IMAGE" python -m fine_tuning_pipeline.resource_preflight',
+            text,
+        )
         self.assertNotIn('--env "LITELLM_API_KEY=', text)
         self.assertIn("dst=/run/pipeline-secrets,readonly", text)
         self.assertIn(

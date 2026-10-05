@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 import fine_tuning_pipeline
 from fine_tuning_pipeline.train_pipeline import (
     DEFAULT_CONFIG_PATH,
@@ -26,7 +28,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         modules = list(pkgutil.walk_packages(
             fine_tuning_pipeline.__path__, fine_tuning_pipeline.__name__ + "."
         ))
-        self.assertEqual(len(modules), 52)
+        self.assertEqual(len(modules), 53)
         for module in modules:
             with self.subTest(module=module.name):
                 imported = importlib.import_module(module.name)
@@ -66,10 +68,23 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertEqual(config["training"]["method"], "lora")
         self.assertEqual(config["training"]["epochs"], 1)
         self.assertTrue(config["orchestration"]["enabled"])
+        self.assertTrue(config["resource_preflight"]["enabled"])
+        self.assertEqual(
+            config["resource_preflight"]["model_parameter_estimate"], 490000000
+        )
+        self.assertEqual(config["serving"]["port"], "auto")
+        self.assertEqual(config["serving"]["port_range"], {"start": 8101, "end": 8199})
         self.assertEqual(config["serving"]["advertise_host"], "${SERVING_ADVERTISE_HOST}")
         self.assertEqual(config["gateway"]["base_url"], "${LITELLM_BASE_URL}")
         self.assertEqual(config["gateway"]["api_key"], "${LITELLM_API_KEY}")
         self.assertTrue(config["gateway"]["allow_insecure_http"])
+
+        ci = yaml.safe_load((REPOSITORY_ROOT / ".gitlab-ci.yml").read_text(encoding="utf-8"))
+        phase = ci["phase1-finetune"]
+        self.assertEqual(phase["when"], "manual")
+        self.assertEqual(phase["variables"]["PIPELINE_RESOURCE_PREFLIGHT"], "1")
+        self.assertEqual(phase["variables"]["GPU_DEVICE"], "auto")
+        self.assertNotIn("GPU_MIN_FREE_MIB", phase["variables"])
 
     def test_installed_import_and_default_config_ignore_working_directory(self):
         environment = os.environ.copy()

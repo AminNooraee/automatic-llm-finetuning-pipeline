@@ -4,6 +4,11 @@ set -eu
 
 REBUILD=0
 CONFIG_PATH=configs/full_pipeline_example.yaml
+RESOURCE_PREFLIGHT=${PIPELINE_RESOURCE_PREFLIGHT:-0}
+case "$RESOURCE_PREFLIGHT" in
+    0|1) ;;
+    *) echo "PIPELINE_RESOURCE_PREFLIGHT must be 0 or 1." >&2; exit 2 ;;
+esac
 DOCKER_BUILD_NETWORK=${PIPELINE_DOCKER_BUILD_NETWORK:-auto}
 case "$DOCKER_BUILD_NETWORK" in
     auto|default|host|host-dns) ;;
@@ -26,6 +31,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 SELECTED_GPU_IS_SET=0
+SELECTED_PORT_IS_SET=0
 if [ "${PIPELINE_SELECTED_GPU+x}" = x ]; then
     case "$PIPELINE_SELECTED_GPU" in
         ''|*[!0-9]*)
@@ -117,6 +123,7 @@ CONTROLLER_IMAGE=automatic-llm-finetuner-controller:$TAG_ID
 TRAINING_IMAGE=automatic-llm-finetuner:$TAG_ID-cuda-u${HOST_UID}g${HOST_GID}
 BUILD_LOG=
 SECRET_DIR=
+PREFLIGHT_DIR=
 DNS_CONTEXT_DIR=
 
 cleanup_dns_context() {
@@ -133,6 +140,11 @@ cleanup_temporary_files() {
         rm -f -- "$BUILD_LOG"
     fi
     if [ -n "$SECRET_DIR" ]; then
+        if [ -n "$PREFLIGHT_DIR" ]; then
+            rm -f -- "$PREFLIGHT_DIR/estimate.env" "$PREFLIGHT_DIR/gpu.env" \
+                "$PREFLIGHT_DIR/port.env"
+            rmdir -- "$PREFLIGHT_DIR" 2>/dev/null || true
+        fi
         rm -f -- "$SECRET_DIR/litellm_api_key" "$SECRET_DIR/hf_token"
         rmdir -- "$SECRET_DIR" 2>/dev/null || true
     fi
@@ -338,6 +350,56 @@ if [ -n "${HF_TOKEN-}" ]; then
     (umask 077 && printf '%s' "$HF_TOKEN" > "$SECRET_DIR/hf_token")
 fi
 
+run_resource_preflight_helper() {
+    helper_mode=$1
+    helper_network=$2
+    helper_output=$3
+    set -- docker run --rm --read-only --network "$helper_network" \
+        --security-opt no-new-privileges \
+        --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+        --user "$HOST_UID:$HOST_GID" \
+        --label fine-tuning-pipeline.managed=true \
+        --label fine-tuning-pipeline.role=resource-preflight \
+        --label "fine-tuning-pipeline.execution-id=$EXECUTION_ID" \
+        --mount "type=bind,src=$PROJECT_DIR,dst=/workspace/project,readonly" \
+        --mount "type=bind,src=$SECRET_DIR,dst=/run/pipeline-secrets,readonly" \
+        --mount "type=bind,src=$PREFLIGHT_DIR,dst=/run/resource-preflight"
+    if [ -n "${SERVING_ADVERTISE_HOST-}" ]; then
+        set -- "$@" --env SERVING_ADVERTISE_HOST
+    fi
+    if [ -n "${LITELLM_BASE_URL-}" ]; then
+        set -- "$@" --env LITELLM_BASE_URL
+    fi
+    set -- "$@" "$CONTROLLER_IMAGE" python -m fine_tuning_pipeline.resource_preflight \
+        "$helper_mode" --config "/workspace/project/$CONFIG_REL" \
+        --output "/run/resource-preflight/$helper_output"
+    "$@"
+}
+
+if [ "$RESOURCE_PREFLIGHT" -eq 1 ]; then
+    PREFLIGHT_DIR=$SECRET_DIR/resource-preflight
+    mkdir "$PREFLIGHT_DIR"
+    chmod 700 "$PREFLIGHT_DIR"
+
+    run_resource_preflight_helper estimate none estimate.env
+    . "$PREFLIGHT_DIR/estimate.env"
+    if [ "${PIPELINE_RESOURCE_PREFLIGHT_ENABLED-0}" -ne 1 ]; then
+        echo "PIPELINE_RESOURCE_PREFLIGHT=1 requires resource_preflight.enabled=true in the config." >&2
+        exit 2
+    fi
+    export GPU_ESTIMATED_TRAINING_MIB GPU_SERVING_MEMORY_UTILIZATION_BPS
+    selected_gpu_env=${GPU_PREFLIGHT_ENV_FILE:-$PREFLIGHT_DIR/gpu.env}
+    GPU_PREFLIGHT_ENV_FILE=$selected_gpu_env sh "$PROJECT_DIR/scripts/gpu_preflight.sh"
+    . "$selected_gpu_env"
+    export PIPELINE_SELECTED_GPU
+    SELECTED_GPU_IS_SET=1
+
+    run_resource_preflight_helper select-port host port.env
+    . "$PREFLIGHT_DIR/port.env"
+    export PIPELINE_SELECTED_PORT
+    SELECTED_PORT_IS_SET=1
+fi
+
 set -- docker run --rm --read-only --network host \
     --security-opt no-new-privileges \
     --tmpfs /tmp:rw,noexec,nosuid,size=64m \
@@ -367,6 +429,9 @@ set -- docker run --rm --read-only --network host \
 set -- "$@" --env "PIPELINE_WORKER_UID=$HOST_UID" --env "PIPELINE_WORKER_GID=$HOST_GID"
 if [ "$SELECTED_GPU_IS_SET" -eq 1 ]; then
     set -- "$@" --env "PIPELINE_SELECTED_GPU=$PIPELINE_SELECTED_GPU"
+fi
+if [ "$SELECTED_PORT_IS_SET" -eq 1 ]; then
+    set -- "$@" --env "PIPELINE_SELECTED_PORT=$PIPELINE_SELECTED_PORT"
 fi
 if [ -n "${SERVING_ADVERTISE_HOST-}" ]; then
     set -- "$@" --env SERVING_ADVERTISE_HOST

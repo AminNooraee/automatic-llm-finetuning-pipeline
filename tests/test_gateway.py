@@ -25,18 +25,20 @@ TESTS_DIR = Path(__file__).resolve().parent
 FAKE_SECRET = "fake-master-key-never-persist"
 
 
-def serving_config(advertise_host="model-server.example"):
+def serving_config(advertise_host="model-server.example", *, port=8101, environment=None):
     return resolve_serving_config(
         {
             "enabled": True,
             "advertise_host": advertise_host,
-            "port": 8101,
+            "port": port,
+            **({"port_range": {"start": 8101, "end": 8199}} if port == "auto" else {}),
             "base_model_name": "served-base",
             "fine_tuned_model_name": "served-fine",
         },
         run_id="run-1",
         base_model="Org/Base",
         training_method="lora",
+        environment=environment,
     )
 
 
@@ -422,6 +424,22 @@ class GatewayManagerTests(unittest.TestCase):
             )
             self.assertNotIn(FAKE_SECRET, combined)
             self.assertNotIn("Authorization", combined)
+
+    def test_selected_serving_port_is_used_for_litellm_registration(self):
+        provider = self.Provider()
+        selected_serving = serving_config(
+            port="auto", environment={"PIPELINE_SELECTED_PORT": "8107"}
+        )
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            GatewayManager(
+                gateway_config(), provider=provider, verifier=self.Verifier()
+            ).register_and_verify(
+                run_id="run-1", run_root=Path(temporary), serving=selected_serving
+            )
+        self.assertEqual(
+            [record.api_base for record in provider.created],
+            ["http://model-server.example:8107/v1"] * 2,
+        )
 
     def test_cleanup_rolls_back_only_registration_ids_created_by_this_run(self):
         class RollbackProvider(self.Provider):

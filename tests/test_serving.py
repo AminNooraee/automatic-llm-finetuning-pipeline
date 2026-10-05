@@ -18,6 +18,7 @@ from fine_tuning_pipeline.serving.contracts import (
 )
 from fine_tuning_pipeline.serving.health import OpenAIEndpointVerifier
 from fine_tuning_pipeline.serving.manager import ServingManager
+from fine_tuning_pipeline.serving.manifest import endpoint_manifest
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -118,6 +119,39 @@ class ServingConfigTests(unittest.TestCase):
     def test_advertise_host_builds_provider_neutral_url(self):
         config = serving_config(advertise_host="10.20.30.40", port=9000)
         self.assertEqual(config.base_url, "http://10.20.30.40:9000/v1")
+
+    def test_fixed_port_remains_backward_compatible(self):
+        config = serving_config(port=8123)
+        self.assertEqual(config.port, 8123)
+        self.assertIsNone(config.port_range)
+
+    def test_auto_port_uses_authoritative_selected_port_everywhere(self):
+        config = serving_config(
+            port="auto",
+            port_range={"start": 8101, "end": 8199},
+            environment={"PIPELINE_SELECTED_PORT": "8107"},
+        )
+        self.assertEqual(config.port, 8107)
+        self.assertEqual(config.base_url, "http://model.example:8107/v1")
+        self.assertEqual(
+            endpoint_manifest(config)["base_url"],
+            "http://model.example:8107/v1",
+        )
+        command = build_vllm_docker_command(
+            ServingLaunchRequest(
+                "run-1", "Org/Base-Model", "abc123", Path("adapter"), 8, config
+            )
+        )
+        self.assertEqual(command[command.index("--publish") + 1], "0.0.0.0:8107:8000")
+
+    def test_auto_port_requires_valid_in_range_admission(self):
+        raw = {
+            "port": "auto",
+            "port_range": {"start": 8101, "end": 8102},
+        }
+        for environment in ({}, {"PIPELINE_SELECTED_PORT": "bad"}, {"PIPELINE_SELECTED_PORT": "8103"}):
+            with self.subTest(environment=environment), self.assertRaises(ServingConfigError):
+                serving_config(environment=environment, **raw)
 
     def test_advertise_host_resolves_exact_environment_reference(self):
         config = serving_config(
@@ -372,6 +406,44 @@ class ServingHealthTests(unittest.TestCase):
             self.assertEqual(operation["container_id"], "container-id")
             combined = "".join(path.read_text(encoding="utf-8") for path in (root / "serving").iterdir())
             self.assertNotIn("api_key", combined.lower())
+
+    def test_selected_port_reaches_health_checks_and_endpoint_manifest(self):
+        class Backend:
+            def preflight(self, request):
+                self.request = request
+
+            def launch(self, request):
+                return ServingLaunchResult("container-id", ("docker", "run"))
+
+        selected = serving_config(
+            port="auto",
+            port_range={"start": 8101, "end": 8199},
+            environment={"PIPELINE_SELECTED_PORT": "8107"},
+        )
+        transport = FakeTransport(
+            self.success_responses("example-base", "example-finetuned")
+        )
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            result = ServingManager(
+                backend=Backend(),
+                verifier=OpenAIEndpointVerifier(transport=transport),
+            ).start_and_verify(
+                run_id="run",
+                run_root=root,
+                config=selected,
+                base_model="Org/Base",
+                resolved_revision="revision",
+                adapter_path=root / "model",
+                lora_rank=64,
+            )
+            manifest = json.loads(
+                (root / result["manifest_path"]).read_text(encoding="utf-8")
+            )
+        self.assertEqual(manifest["base_url"], "http://model.example:8107/v1")
+        self.assertTrue(
+            all(call[1].startswith("http://model.example:8107/v1/") for call in transport.calls)
+        )
 
     def test_manager_persists_owned_container_when_readiness_fails(self):
         class Backend:

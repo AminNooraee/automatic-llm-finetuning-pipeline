@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from math import isfinite
@@ -39,6 +40,7 @@ class ServingConfig:
     bind_host: str = "0.0.0.0"
     advertise_host: str = "localhost"
     port: int = 8101
+    port_range: tuple[int, int] | None = None
     base_model_name: str = ""
     fine_tuned_model_name: str = ""
     container_name: str = ""
@@ -55,7 +57,7 @@ class ServingConfig:
 
 
 _TOP_FIELDS = {
-    "enabled", "backend", "runtime", "bind_host", "advertise_host", "port",
+    "enabled", "backend", "runtime", "bind_host", "advertise_host", "port", "port_range",
     "base_model_name", "fine_tuned_model_name", "container_name", "restart_policy", "vllm", "health_check",
 }
 _VLLM_FIELDS = {
@@ -108,7 +110,23 @@ def resolve_serving_config(
     advertise_host = _host(
         advertise_host_value, "serving.advertise_host", wildcard=False
     )
-    port = _integer(section.get("port", 8101), "serving.port", minimum=1, maximum=65535)
+    port_value = section.get("port", 8101)
+    port_range = _port_range(section.get("port_range"), automatic=port_value == "auto")
+    if port_value == "auto":
+        selected_port = (os.environ if environment is None else environment).get(
+            "PIPELINE_SELECTED_PORT"
+        )
+        if not isinstance(selected_port, str) or not re.fullmatch(r"[0-9]+", selected_port):
+            raise ServingConfigError(
+                "serving.port is auto but PIPELINE_SELECTED_PORT is missing or invalid"
+            )
+        port = int(selected_port)
+        if port_range is None or not port_range[0] <= port <= port_range[1]:
+            raise ServingConfigError(
+                "PIPELINE_SELECTED_PORT is outside serving.port_range"
+            )
+    else:
+        port = _integer(port_value, "serving.port", minimum=1, maximum=65535)
 
     trace = safe_identifier(run_id, fallback="run", limit=40)
     base_fallback = f"{safe_identifier(base_model.rsplit('/', 1)[-1], fallback='base', limit=72)}-{trace}"
@@ -181,6 +199,7 @@ def resolve_serving_config(
         bind_host=bind_host,
         advertise_host=advertise_host,
         port=port,
+        port_range=port_range,
         base_model_name=base_name,
         fine_tuned_model_name=fine_name,
         container_name=container,
@@ -240,6 +259,22 @@ def _positive_number(value: Any, label: str) -> float:
     if number <= 0:
         raise ServingConfigError(f"{label} must be greater than 0")
     return number
+
+
+def _port_range(value: Any, *, automatic: bool) -> tuple[int, int] | None:
+    if not automatic:
+        if value is not None:
+            raise ServingConfigError(
+                "serving.port_range is only valid when serving.port is auto"
+            )
+        return None
+    mapping = _mapping(value, "serving.port_range")
+    _unknown(mapping, {"start", "end"}, "serving.port_range")
+    start = _integer(mapping.get("start"), "serving.port_range.start", minimum=1, maximum=65535)
+    end = _integer(mapping.get("end"), "serving.port_range.end", minimum=1, maximum=65535)
+    if start > end:
+        raise ServingConfigError("serving.port_range.start must not exceed end")
+    return start, end
 
 
 def _name(value: Any, label: str, generated: str) -> str:

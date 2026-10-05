@@ -23,6 +23,15 @@ training:
     alpha: 16
     dropout: 0.0
 
+# The official Qwen model card publishes this model as 0.49B parameters:
+# https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct
+# The activation allowance is explicit; the result is an estimate, not a guarantee.
+resource_preflight:
+  enabled: true
+  model_parameter_estimate: 490000000
+  activation_bytes_per_token: 1048576
+  safety_margin_percent: 25
+
 orchestration:
   enabled: true
   training:
@@ -36,7 +45,10 @@ serving:
   runtime: docker
   bind_host: 0.0.0.0
   advertise_host: ${SERVING_ADVERTISE_HOST}
-  port: 8101
+  port: auto
+  port_range:
+    start: 8101
+    end: 8199
   base_model_name: auto
   fine_tuned_model_name: auto
   container_name: auto

@@ -197,6 +197,29 @@ serving:
     interval_seconds: 2
 ```
 
+`serving.port` accepts a fixed integer for backward compatibility. Unified
+resource admission can instead use a bounded automatic range:
+
+```yaml
+resource_preflight:
+  enabled: true
+  model_parameter_estimate: 490000000
+  activation_bytes_per_token: 1048576
+  safety_margin_percent: 25
+
+serving:
+  port: auto
+  port_range:
+    start: 8101
+    end: 8199
+```
+
+The parameter count and activation allowance are explicit planning inputs, not
+values inferred from the model name. The estimate is conservative but is not a
+guarantee. `safety_margin_percent` must be between 10 and 100. Automatic ports
+require `PIPELINE_SELECTED_PORT`, which the opted-in launcher preflight produces;
+users do not choose the port manually.
+
 `bind_host` controls the local published socket. `advertise_host` must be a
 reachable hostname/IP without a scheme, path, or port and becomes the host in
 the endpoint handoff and LiteLLM backend URL. It cannot be a wildcard. Port is
