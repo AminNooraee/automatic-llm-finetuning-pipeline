@@ -3,8 +3,8 @@ model:
   name: Qwen/Qwen2.5-0.5B-Instruct
 
 dataset:
-  path: phase1_train.json
-  name: phase1_train
+  path: phase1_sanity.json
+  name: phase1_sanity
   source_format: auto
   format: auto
 
