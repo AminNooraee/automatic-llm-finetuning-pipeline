@@ -56,7 +56,7 @@ class RepositoryLayoutTests(unittest.TestCase):
                     self.assertEqual(config["dataset"]["path"], "lhoestq/demo1")
                     self.assertEqual(config["dataset"]["split"], "train[4:5]")
                 elif name == "ci_phase1.yaml":
-                    self.assertEqual(config["dataset"]["path"], "phase1_train.json")
+                    self.assertEqual(config["dataset"]["path"], "phase1_sanity.json")
                 else:
                     dataset = resolve_config_path(config["dataset"]["path"], path.parent)
                     self.assertEqual(dataset, REPOSITORY_ROOT / "examples" / "datasets" / "alpaca_demo.json")
