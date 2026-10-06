@@ -57,7 +57,7 @@ serving:
   vllm:
     image: vllm/vllm-openai:v0.11.0
     gpu_devices: "0"
-    gpu_memory_utilization: 0.15
+    gpu_memory_utilization: 0.10
     max_model_len: 4096
     max_num_seqs: 2
   health_check:
