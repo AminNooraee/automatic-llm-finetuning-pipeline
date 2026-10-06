@@ -64,7 +64,7 @@ class ResourceEstimatorTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first.subtotal_training_mib, 3918)
         self.assertEqual(first.required_training_mib, 4897)
-        self.assertEqual(first.serving_memory_utilization_bps, 1500)
+        self.assertEqual(first.serving_memory_utilization_bps, 1000)
         self.assertEqual(first.safety_margin_percent, 25)
         self.assertEqual(first.label, "estimate")
 
