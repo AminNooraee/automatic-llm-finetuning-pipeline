@@ -35,6 +35,7 @@ class TrainingConfig:
     save_steps: int
     logging_steps: int
     lora: LoraConfig | None = None
+    attention_backend: str = "auto"
 
     def to_llamafactory_args(self) -> dict[str, Any]:
         """Return only validated arguments understood by LLaMA-Factory."""
@@ -58,6 +59,14 @@ class TrainingConfig:
                     "lora_dropout": self.lora.dropout,
                 }
             )
+        attention_backend_mapping = {
+            "eager": "disabled",
+            "sdpa": "sdpa",
+            "fa2": "fa2",
+            "fa3": "fa3",
+        }
+        if self.attention_backend != "auto":
+            args["flash_attn"] = attention_backend_mapping[self.attention_backend]
         return args
 
 
@@ -72,14 +81,16 @@ _COMMON_FIELDS = {
     "save_steps",
     "logging_steps",
     "lora",
+    "attention_backend",
 }
-_REQUIRED_FIELDS = _COMMON_FIELDS - {"lora"}
+_REQUIRED_FIELDS = _COMMON_FIELDS - {"lora", "attention_backend"}
 _LORA_FIELDS = {"rank", "alpha", "dropout"}
 _METHOD_SPECS = {
     "lora": _MethodSpec(finetuning_type="lora", uses_lora=True),
     "full": _MethodSpec(finetuning_type="full", uses_lora=False),
 }
 _SUPPORTED_PRECISIONS = {"fp32", "fp16", "bf16"}
+_SUPPORTED_ATTENTION_BACKENDS = {"auto", "eager", "sdpa", "fa2", "fa3"}
 
 
 def _require_mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -186,6 +197,11 @@ def resolve_training_config(raw_training: Any) -> TrainingConfig:
     precision = _require_choice(
         training["precision"], "training.precision", _SUPPORTED_PRECISIONS
     )
+    attention_backend = _require_choice(
+        training.get("attention_backend", "auto"),
+        "training.attention_backend",
+        _SUPPORTED_ATTENTION_BACKENDS,
+    )
 
     raw_lora = training.get("lora")
     if method_spec.uses_lora:
@@ -225,4 +241,5 @@ def resolve_training_config(raw_training: Any) -> TrainingConfig:
             training["logging_steps"], "training.logging_steps"
         ),
         lora=lora,
+        attention_backend=attention_backend,
     )

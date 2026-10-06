@@ -14,6 +14,7 @@ training:
   learning_rate: 0.00005
   batch_size: 1
   precision: fp32
+  attention_backend: eager
   gradient_checkpointing: false
   cutoff_len: 2048
   save_steps: 10

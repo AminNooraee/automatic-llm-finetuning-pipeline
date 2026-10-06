@@ -13,6 +13,7 @@ from unittest.mock import patch
 import yaml
 
 import fine_tuning_pipeline
+from fine_tuning_pipeline.model_manager import resolve_model_compatibility
 from fine_tuning_pipeline.train_pipeline import (
     DEFAULT_CONFIG_PATH,
     REPOSITORY_ROOT,
@@ -21,6 +22,7 @@ from fine_tuning_pipeline.train_pipeline import (
     resolve_config_path,
 )
 from fine_tuning_pipeline.training_config import resolve_training_config
+from fine_tuning_pipeline.yaml_generator import build_llamafactory_config
 
 
 class RepositoryLayoutTests(unittest.TestCase):
@@ -67,6 +69,23 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertEqual(config["model"]["name"], "Qwen/Qwen2.5-0.5B-Instruct")
         self.assertEqual(config["training"]["method"], "lora")
         self.assertEqual(config["training"]["epochs"], 1)
+        resolved_training = resolve_training_config(config["training"])
+        self.assertEqual(resolved_training.attention_backend, "eager")
+        model_compatibility = resolve_model_compatibility(
+            config["model"]["name"],
+            config_loader=lambda _model_name: {
+                "model_type": "qwen2",
+                "architectures": ["Qwen2ForCausalLM"],
+            },
+        )
+        config["model"]["template"] = model_compatibility.template
+        generated_training = build_llamafactory_config(
+            config,
+            dataset_dir=REPOSITORY_ROOT / "datasets",
+            output_dir=REPOSITORY_ROOT / "runs" / "phase1" / "model",
+            training_config=resolved_training,
+        )
+        self.assertEqual(generated_training["flash_attn"], "disabled")
         self.assertTrue(config["orchestration"]["enabled"])
         self.assertTrue(config["resource_preflight"]["enabled"])
         self.assertEqual(

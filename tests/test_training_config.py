@@ -29,6 +29,44 @@ def valid_training_config():
 
 
 class TrainingConfigurationTests(unittest.TestCase):
+    def test_omitted_attention_backend_defaults_to_auto_without_flash_attn(self):
+        resolved = resolve_training_config(valid_training_config())
+
+        self.assertEqual(resolved.attention_backend, "auto")
+        self.assertNotIn("flash_attn", resolved.to_llamafactory_args())
+
+    def test_attention_backends_translate_to_llamafactory_values(self):
+        expected_values = {
+            "eager": "disabled",
+            "sdpa": "sdpa",
+            "fa2": "fa2",
+            "fa3": "fa3",
+        }
+
+        for public_value, llamafactory_value in expected_values.items():
+            with self.subTest(attention_backend=public_value):
+                config = valid_training_config()
+                config["attention_backend"] = public_value
+                generated = resolve_training_config(config).to_llamafactory_args()
+                self.assertEqual(generated["flash_attn"], llamafactory_value)
+
+    def test_explicit_auto_attention_backend_omits_flash_attn(self):
+        config = valid_training_config()
+        config["attention_backend"] = "auto"
+
+        generated = resolve_training_config(config).to_llamafactory_args()
+
+        self.assertNotIn("flash_attn", generated)
+
+    def test_invalid_attention_backend_is_rejected(self):
+        config = valid_training_config()
+        config["attention_backend"] = "flash-attention"
+
+        with self.assertRaisesRegex(
+            TrainingConfigError, "training.attention_backend must be one of"
+        ):
+            resolve_training_config(config)
+
     def test_all_config_values_propagate_to_llamafactory_arguments(self):
         resolved = resolve_training_config(valid_training_config())
 
