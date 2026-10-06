@@ -64,7 +64,7 @@ class ResourceEstimatorTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first.subtotal_training_mib, 3918)
         self.assertEqual(first.required_training_mib, 4897)
-        self.assertEqual(first.serving_memory_utilization_bps, 1000)
+        self.assertEqual(first.serving_memory_utilization_bps, 1500)
         self.assertEqual(first.safety_margin_percent, 25)
         self.assertEqual(first.label, "estimate")
 
@@ -150,7 +150,7 @@ class ResourceEstimatorTests(unittest.TestCase):
         )
         self.assertTrue(policy.enabled)
         self.assertEqual(estimate.required_training_mib, 6065)
-        self.assertEqual(estimate.serving_memory_utilization_bps, 1500)
+        self.assertEqual(estimate.serving_memory_utilization_bps, 1000)
         self.assertEqual(serving.port_range, (8101, 8199))
 
 
