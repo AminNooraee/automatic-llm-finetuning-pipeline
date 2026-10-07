@@ -6,6 +6,7 @@ from pathlib import Path
 from fine_tuning_pipeline.gateway.config import GatewayConfigError, resolve_gateway_config
 from fine_tuning_pipeline.gateway.contracts import (
     GatewayCapabilityError,
+    GatewayCleanupError,
     GatewayConflictError,
     GatewayError,
     GatewayRegistrationOutcomeError,
@@ -196,6 +197,16 @@ class GatewayConfigTests(unittest.TestCase):
 
 
 class LiteLLMProviderTests(unittest.TestCase):
+    def test_successful_registration_response_remains_single_post(self):
+        transport = FakeTransport([JsonResponse(201, {"model_id": "id-base"})])
+        record = LiteLLMProvider(gateway_config(), transport=transport).register(
+            role="base", alias="gateway-base", served_model="served-base",
+            api_base="http://server/v1", run_id="run-1",
+        )
+        self.assertEqual(record.status, "created")
+        self.assertEqual(record.registration_id, "id-base")
+        self.assertEqual([call[0] for call in transport.calls], ["POST"])
+
     def test_preflight_alias_query_and_both_registration_mappings(self):
         transport = FakeTransport([
             JsonResponse(200, {"data": []}),
@@ -256,7 +267,7 @@ class LiteLLMProviderTests(unittest.TestCase):
             )
         self.assertEqual(caught.exception.outcome, "absent")
 
-    def test_ambiguous_registration_is_reconciled_without_retry(self):
+    def test_timeout_reconciliation_polls_until_owned_record_appears_without_retry(self):
         owned = {
             "model_name": "gateway-base",
             "litellm_params": {"model": "openai/served-base"},
@@ -267,9 +278,20 @@ class LiteLLMProviderTests(unittest.TestCase):
             },
         }
         transport = FakeTransport(
-            [RuntimeError("connection reset"), JsonResponse(200, {"data": [owned]})]
+            [
+                RuntimeError("connection reset"),
+                JsonResponse(200, {"data": []}),
+                JsonResponse(200, {"data": [owned]}),
+            ]
         )
-        record = LiteLLMProvider(gateway_config(), transport=transport).register(
+        sleeps = []
+        record = LiteLLMProvider(
+            gateway_config(),
+            transport=transport,
+            reconciliation_interval_seconds=2,
+            reconciliation_grace_seconds=2,
+            sleep=sleeps.append,
+        ).register(
             role="base",
             alias="gateway-base",
             served_model="served-base",
@@ -278,12 +300,37 @@ class LiteLLMProviderTests(unittest.TestCase):
         )
         self.assertEqual(record.status, "created_after_ambiguous_response")
         self.assertEqual(record.registration_id, "persisted-id")
-        self.assertEqual([call[0] for call in transport.calls], ["POST", "GET"])
+        self.assertEqual([call[0] for call in transport.calls], ["POST", "GET", "GET"])
+        self.assertEqual(sleeps, [2])
+        self.assertEqual([call[0] for call in transport.calls].count("POST"), 1)
+
+    def test_timeout_reconciliation_expires_as_absent_without_retry(self):
+        transport = FakeTransport(
+            [RuntimeError("timeout")] + [JsonResponse(200, {"data": []})] * 3
+        )
+        with self.assertRaises(GatewayRegistrationOutcomeError) as caught:
+            LiteLLMProvider(
+                gateway_config(),
+                transport=transport,
+                reconciliation_interval_seconds=2,
+                reconciliation_grace_seconds=4,
+                sleep=lambda _seconds: None,
+            ).register(
+                role="base", alias="gateway-base", served_model="served-base",
+                api_base="http://server/v1", run_id="run-1",
+            )
+        self.assertEqual(caught.exception.outcome, "absent")
+        self.assertEqual([call[0] for call in transport.calls].count("POST"), 1)
+        self.assertEqual([call[0] for call in transport.calls].count("GET"), 3)
 
     def test_unavailable_reconciliation_is_indeterminate_and_not_retried(self):
         transport = FakeTransport([RuntimeError("timeout"), RuntimeError("still unavailable")])
         with self.assertRaises(GatewayRegistrationOutcomeError) as caught:
-            LiteLLMProvider(gateway_config(), transport=transport).register(
+            LiteLLMProvider(
+                gateway_config(),
+                transport=transport,
+                reconciliation_grace_seconds=0,
+            ).register(
                 role="base",
                 alias="gateway-base",
                 served_model="served-base",
@@ -309,6 +356,53 @@ class LiteLLMProviderTests(unittest.TestCase):
         self.assertEqual(caught.exception.outcome, "conflict")
         self.assertEqual([call[0] for call in transport.calls], ["POST", "GET"])
 
+    def test_timeout_reconciliation_detects_late_foreign_conflict(self):
+        conflicting = {
+            "model_name": "gateway-base",
+            "model_id": "foreign-id",
+            "model_info": {"pipeline_run_id": "another-run", "pipeline_role": "base"},
+        }
+        transport = FakeTransport([
+            RuntimeError("timeout"),
+            JsonResponse(200, {"data": []}),
+            JsonResponse(200, {"data": [conflicting]}),
+        ])
+        with self.assertRaises(GatewayRegistrationOutcomeError) as caught:
+            LiteLLMProvider(
+                gateway_config(), transport=transport,
+                reconciliation_interval_seconds=2, reconciliation_grace_seconds=2,
+                sleep=lambda _seconds: None,
+            ).register(
+                role="base", alias="gateway-base", served_model="served-base",
+                api_base="http://server/v1", run_id="run-1",
+            )
+        self.assertEqual(caught.exception.outcome, "conflict")
+        self.assertEqual([call[0] for call in transport.calls].count("POST"), 1)
+
+    def test_timeout_reconciliation_rejects_duplicate_owned_records(self):
+        def owned(registration_id):
+            return {
+                "model_name": "gateway-base",
+                "model_id": registration_id,
+                "model_info": {"pipeline_run_id": "run-1", "pipeline_role": "base"},
+            }
+
+        transport = FakeTransport([
+            RuntimeError("timeout"),
+            JsonResponse(200, {"data": [owned("id-1"), owned("id-2")]}),
+        ])
+        with self.assertRaises(GatewayRegistrationOutcomeError) as caught:
+            LiteLLMProvider(
+                gateway_config(), transport=transport,
+                reconciliation_interval_seconds=2, reconciliation_grace_seconds=2,
+                sleep=lambda _seconds: None,
+            ).register(
+                role="base", alias="gateway-base", served_model="served-base",
+                api_base="http://server/v1", run_id="run-1",
+            )
+        self.assertEqual(caught.exception.outcome, "indeterminate")
+        self.assertEqual([call[0] for call in transport.calls], ["POST", "GET"])
+
     def test_owned_delete_uses_exact_registration_id_and_rechecks_management_data(self):
         owned = {
             "model_name": "gateway-base",
@@ -327,6 +421,58 @@ class LiteLLMProviderTests(unittest.TestCase):
         self.assertTrue(provider.delete_owned(record, run_id="run-1"))
         self.assertEqual(transport.calls[1][2]["payload"], {"id": "id-base"})
         self.assertEqual([call[0] for call in transport.calls], ["GET", "POST", "GET"])
+
+    def test_identity_cleanup_polls_for_and_deletes_late_owned_registration(self):
+        owned = {
+            "model_name": "gateway-fine",
+            "model_id": "late-id",
+            "model_info": {"pipeline_run_id": "run-1", "pipeline_role": "fine_tuned"},
+        }
+        transport = FakeTransport([
+            JsonResponse(200, {"data": []}),
+            JsonResponse(200, {"data": [owned]}),
+            JsonResponse(200, {"data": [owned]}),
+            JsonResponse(200, {}),
+            JsonResponse(200, {"data": []}),
+            JsonResponse(200, {"data": []}),
+        ])
+        provider = LiteLLMProvider(
+            gateway_config(), transport=transport,
+            reconciliation_interval_seconds=2, reconciliation_grace_seconds=2,
+            sleep=lambda _seconds: None,
+        )
+        self.assertEqual(
+            provider.delete_owned_by_identity(
+                role="fine_tuned", alias="gateway-fine", run_id="run-1"
+            ),
+            ("late-id",),
+        )
+        delete_calls = [call for call in transport.calls if call[0] == "POST"]
+        self.assertEqual(len(delete_calls), 1)
+        self.assertEqual(delete_calls[0][2]["payload"], {"id": "late-id"})
+
+    def test_identity_cleanup_never_deletes_foreign_registration(self):
+        foreign = {
+            "model_name": "gateway-fine",
+            "model_id": "foreign-id",
+            "model_info": {
+                "pipeline_run_id": "another-run",
+                "pipeline_role": "fine_tuned",
+            },
+        }
+        transport = FakeTransport([JsonResponse(200, {"data": [foreign]})] * 3)
+        provider = LiteLLMProvider(
+            gateway_config(), transport=transport,
+            reconciliation_interval_seconds=2, reconciliation_grace_seconds=2,
+            sleep=lambda _seconds: None,
+        )
+        self.assertEqual(
+            provider.delete_owned_by_identity(
+                role="fine_tuned", alias="gateway-fine", run_id="run-1"
+            ),
+            (),
+        )
+        self.assertEqual([call[0] for call in transport.calls], ["GET", "GET", "GET"])
 
 
 class GatewayManagerTests(unittest.TestCase):
@@ -449,6 +595,9 @@ class GatewayManagerTests(unittest.TestCase):
             def delete_owned(self, record, *, run_id):
                 self.deleted.append((record.registration_id, run_id))
                 return True
+            def delete_owned_by_identity(self, *, role, alias, run_id):
+                self.deleted.append((f"late-{role}", run_id))
+                return (f"id-{role}-late",)
 
         provider = RollbackProvider()
         with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
@@ -463,9 +612,37 @@ class GatewayManagerTests(unittest.TestCase):
             artifact = json.loads(
                 (root / "gateway" / "registration.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(provider.deleted, [("id-base", "run-1")])
+            self.assertEqual(
+                provider.deleted,
+                [("id-base", "run-1"), ("late-fine_tuned", "run-1")],
+            )
             self.assertTrue(artifact["automatic_rollback_performed"])
-            self.assertEqual(artifact["rolled_back_registration_ids"], ["id-base"])
+            self.assertEqual(
+                artifact["rolled_back_registration_ids"],
+                ["id-base", "id-fine_tuned-late"],
+            )
+
+    def test_unverified_identity_cleanup_raises_fail_safe_error(self):
+        class UnverifiedCleanupProvider(self.Provider):
+            def __init__(self):
+                super().__init__(fail_role="fine_tuned")
+            def delete_owned(self, record, *, run_id):
+                return True
+            def delete_owned_by_identity(self, *, role, alias, run_id):
+                raise GatewayError("authoritative cleanup unavailable")
+
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            with self.assertRaisesRegex(GatewayCleanupError, "must remain available"):
+                GatewayManager(
+                    gateway_config(),
+                    provider=UnverifiedCleanupProvider(),
+                    verifier=self.Verifier(),
+                ).register_and_verify(
+                    run_id="run-1",
+                    run_root=Path(temporary),
+                    serving=serving_config(),
+                    cleanup_on_failure=True,
+                )
 
 
 if __name__ == "__main__":

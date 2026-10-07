@@ -27,6 +27,10 @@ class GatewayRegistrationOutcomeError(GatewayError):
         self.outcome = outcome
 
 
+class GatewayCleanupError(GatewayError):
+    """Raised when owned gateway state cannot be authoritatively cleaned up."""
+
+
 @dataclass(frozen=True)
 class RegistrationRecord:
     role: str
@@ -63,3 +67,7 @@ class GatewayProvider(Protocol):
     ) -> RegistrationRecord: ...
 
     def delete_owned(self, record: RegistrationRecord, *, run_id: str) -> bool: ...
+
+    def delete_owned_by_identity(
+        self, *, role: str, alias: str, run_id: str
+    ) -> tuple[str, ...]: ...

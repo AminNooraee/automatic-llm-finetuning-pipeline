@@ -18,6 +18,7 @@ import yaml
 
 from ..artifact_validator import read_lora_adapter_metadata, validate_model_artifacts
 from ..gateway.config import resolve_gateway_config
+from ..gateway.contracts import GatewayCleanupError
 from ..gateway.manager import GatewayManager
 from ..security import redact_data, redact_text
 from ..resource_preflight import port_is_available
@@ -482,7 +483,12 @@ class PipelineController:
         except Exception as error:
             serving_rolled_back = False
             serving_rollback_error = None
-            if serving_result is not None and orchestration.cleanup_on_failure:
+            gateway_cleanup_unverified = isinstance(error, GatewayCleanupError)
+            if (
+                serving_result is not None
+                and orchestration.cleanup_on_failure
+                and not gateway_cleanup_unverified
+            ):
                 try:
                     serving_rolled_back = serving_manager.cleanup_owned(
                         run_id=result["run_id"], execution_id=execution_id,
@@ -499,6 +505,7 @@ class PipelineController:
                 error={"type": type(error).__name__},
                 serving_rolled_back=serving_rolled_back,
                 serving_rollback_error=serving_rollback_error,
+                gateway_cleanup_unverified=gateway_cleanup_unverified,
             )
             self._write_deployment_manifest(
                 run_root, execution_id, result, source_revision, source_identity,

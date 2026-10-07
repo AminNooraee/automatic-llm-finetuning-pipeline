@@ -12,6 +12,7 @@ from ..serving.health import OpenAIEndpointVerifier
 from ..serving.manifest import health_artifact, write_json
 from .config import GatewayConfig
 from .contracts import (
+    GatewayCleanupError,
     GatewayConflictError,
     GatewayProvider,
     GatewayRegistrationOutcomeError,
@@ -145,14 +146,37 @@ class GatewayManager:
             }
         except Exception as error:
             rolled_back: list[str] = []
-            rollback_errors: list[str] = []
+            cleanup_failures: dict[tuple[str, str], str] = {}
+            verified_identities: set[tuple[str, str]] = set()
             if cleanup_on_failure and created and hasattr(self.provider, "delete_owned"):
                 for record in reversed(created):
+                    identity = (record.role, record.alias)
                     try:
                         if self.provider.delete_owned(record, run_id=run_id):
                             rolled_back.append(record.registration_id or record.alias)
+                            verified_identities.add(identity)
+                        else:
+                            cleanup_failures[identity] = "GatewayError"
                     except Exception as rollback_error:
-                        rollback_errors.append(type(rollback_error).__name__)
+                        cleanup_failures[identity] = type(rollback_error).__name__
+            if cleanup_on_failure:
+                for attempt in reversed(attempts):
+                    identity = (attempt.role, attempt.alias)
+                    if identity in verified_identities:
+                        continue
+                    if hasattr(self.provider, "delete_owned_by_identity"):
+                        try:
+                            discovered = self.provider.delete_owned_by_identity(
+                                role=attempt.role, alias=attempt.alias, run_id=run_id
+                            )
+                            rolled_back.extend(discovered)
+                            verified_identities.add(identity)
+                            cleanup_failures.pop(identity, None)
+                        except Exception as rollback_error:
+                            cleanup_failures[identity] = type(rollback_error).__name__
+                    else:
+                        cleanup_failures.setdefault(identity, "GatewayError")
+            rollback_errors = list(cleanup_failures.values())
             if attempts:
                 indeterminate = any(item.outcome == "indeterminate" for item in attempts)
                 write_json(
@@ -187,6 +211,11 @@ class GatewayManager:
             secret = self.config.api_key.reveal() if self.config.api_key else ""
             safe_error = redact_text(error, [secret])
             logger.error("Gateway setup failed: %s", safe_error)
+            if cleanup_on_failure and rollback_errors:
+                raise GatewayCleanupError(
+                    "Gateway setup failed and owned-registration cleanup could not be "
+                    "authoritatively verified; the serving backend must remain available"
+                ) from error
             if safe_error != str(error):
                 from .contracts import GatewayError
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import time
+from typing import Any, Callable, Mapping
 
 from ...http_client import JsonTransport, UrllibJsonTransport
 from ...security import redact_text
@@ -16,14 +17,29 @@ from ..contracts import (
 
 
 BACKEND_API_KEY_PLACEHOLDER = "not-required"
+RECONCILIATION_INTERVAL_SECONDS = 2.0
+RECONCILIATION_GRACE_SECONDS = 30.0
 
 
 class LiteLLMProvider:
-    def __init__(self, config: GatewayConfig, *, transport: JsonTransport | None = None):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        *,
+        transport: JsonTransport | None = None,
+        reconciliation_interval_seconds: float = RECONCILIATION_INTERVAL_SECONDS,
+        reconciliation_grace_seconds: float = RECONCILIATION_GRACE_SECONDS,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
         if config.api_key is None:
             raise GatewayError("Internal gateway error: API credential is unavailable")
         self.config = config
         self.transport = transport or UrllibJsonTransport()
+        if reconciliation_interval_seconds <= 0 or reconciliation_grace_seconds < 0:
+            raise ValueError("LiteLLM reconciliation timing must be non-negative")
+        self.reconciliation_interval_seconds = reconciliation_interval_seconds
+        self.reconciliation_grace_seconds = reconciliation_grace_seconds
+        self._sleep = sleep
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -104,6 +120,7 @@ class LiteLLMProvider:
                 api_base=api_base,
                 run_id=run_id,
                 cause=str(error),
+                poll=True,
             )
         if response.status not in {200, 201}:
             return self._reconcile_registration(
@@ -113,6 +130,7 @@ class LiteLLMProvider:
                 api_base=api_base,
                 run_id=run_id,
                 cause=f"HTTP {response.status}",
+                poll=False,
             )
         registration_id = _registration_id(response.data)
         return RegistrationRecord(role, alias, backend_model, api_base, registration_id)
@@ -126,54 +144,65 @@ class LiteLLMProvider:
         api_base: str,
         run_id: str,
         cause: str,
+        poll: bool,
     ) -> RegistrationRecord:
-        try:
-            models = self.management_models()
-        except GatewayError:
+        attempts = self._poll_attempts() if poll else 1
+        last_poll_available = False
+        for attempt in range(attempts):
+            try:
+                models = self.management_models()
+            except GatewayError:
+                last_poll_available = False
+            else:
+                last_poll_available = True
+                owned, foreign = _alias_ownership_matches(
+                    models, alias=alias, run_id=run_id, role=role
+                )
+                if foreign:
+                    raise GatewayRegistrationOutcomeError(
+                        f"LiteLLM registration for alias {alias!r} conflicts with an existing "
+                        f"registration after {cause}; no retry was attempted",
+                        alias=alias,
+                        outcome="conflict",
+                    ) from None
+                if len(owned) == 1:
+                    return RegistrationRecord(
+                        role,
+                        alias,
+                        backend_model,
+                        api_base,
+                        _registration_id(owned[0]),
+                        status="created_after_ambiguous_response",
+                    )
+                if len(owned) > 1:
+                    raise GatewayRegistrationOutcomeError(
+                        f"LiteLLM registration outcome for alias {alias!r} is indeterminate "
+                        f"after {cause}; multiple current-run records were found and no retry "
+                        "was attempted",
+                        alias=alias,
+                        outcome="indeterminate",
+                    ) from None
+            if attempt + 1 < attempts:
+                self._sleep(self.reconciliation_interval_seconds)
+
+        if not last_poll_available:
             raise GatewayRegistrationOutcomeError(
                 f"LiteLLM registration outcome for alias {alias!r} is indeterminate after {cause}; "
                 "authoritative reconciliation was unavailable and no retry was attempted",
                 alias=alias,
                 outcome="indeterminate",
             ) from None
-        alias_matches = [item for item in models if item.get("model_name") == alias]
-        matches = []
-        for item in alias_matches:
-            model_info = item.get("model_info")
-            if (
-                isinstance(model_info, Mapping)
-                and model_info.get("pipeline_run_id") == run_id
-                and model_info.get("pipeline_role") == role
-            ):
-                matches.append(item)
-        if len(matches) == 1:
-            return RegistrationRecord(
-                role,
-                alias,
-                backend_model,
-                api_base,
-                _registration_id(matches[0]),
-                status="created_after_ambiguous_response",
-            )
-        if alias_matches:
-            raise GatewayRegistrationOutcomeError(
-                f"LiteLLM registration for alias {alias!r} conflicts with an existing "
-                f"registration after {cause}; no retry was attempted",
-                alias=alias,
-                outcome="conflict",
-            ) from None
-        if not matches:
-            raise GatewayRegistrationOutcomeError(
-                f"LiteLLM registration for alias {alias!r} was absent after {cause}; no retry was attempted",
-                alias=alias,
-                outcome="absent",
-            ) from None
         raise GatewayRegistrationOutcomeError(
-            f"LiteLLM registration outcome for alias {alias!r} is indeterminate after {cause}; "
-            "multiple current-run records were found and no retry was attempted",
+            f"LiteLLM registration for alias {alias!r} was absent after the bounded "
+            f"reconciliation grace period following {cause}; no retry was attempted",
             alias=alias,
-            outcome="indeterminate",
+            outcome="absent",
         ) from None
+
+    def _poll_attempts(self) -> int:
+        return int(
+            self.reconciliation_grace_seconds // self.reconciliation_interval_seconds
+        ) + 1
 
     def delete_owned(self, record: RegistrationRecord, *, run_id: str) -> bool:
         """Delete one exact registration only after authoritative ownership proof."""
@@ -209,6 +238,46 @@ class LiteLLMProvider:
             raise GatewayError("LiteLLM owned-registration rollback could not be verified")
         return True
 
+    def delete_owned_by_identity(
+        self, *, role: str, alias: str, run_id: str
+    ) -> tuple[str, ...]:
+        """Find and delete late registrations carrying this run's exact ownership labels."""
+        deleted: list[str] = []
+        attempts = self._poll_attempts()
+        for attempt in range(attempts):
+            try:
+                models = self.management_models()
+            except GatewayError as error:
+                raise GatewayError(
+                    f"LiteLLM cleanup for alias {alias!r} could not verify authoritative state"
+                ) from error
+            owned, _foreign = _alias_ownership_matches(
+                models, alias=alias, run_id=run_id, role=role
+            )
+            for item in owned:
+                registration_id = _registration_id(item)
+                if registration_id is None:
+                    raise GatewayError(
+                        f"LiteLLM cleanup for alias {alias!r} found an owned registration "
+                        "without an authoritative registration ID"
+                    )
+                record = RegistrationRecord(role, alias, "", "", registration_id)
+                if self.delete_owned(record, run_id=run_id):
+                    deleted.append(registration_id)
+            if attempt + 1 < attempts:
+                self._sleep(self.reconciliation_interval_seconds)
+
+        remaining_models = self.management_models()
+        remaining, _foreign = _alias_ownership_matches(
+            remaining_models, alias=alias, run_id=run_id, role=role
+        )
+        if remaining:
+            raise GatewayError(
+                f"LiteLLM cleanup for alias {alias!r} could not verify that owned "
+                "registrations were removed"
+            )
+        return tuple(dict.fromkeys(deleted))
+
     def _request(self, method: str, url: str, *, payload: Mapping[str, Any] | None = None):
         try:
             return self.transport.request(
@@ -235,3 +304,27 @@ def _registration_id(value: Any) -> str | None:
     if isinstance(model_info, Mapping) and isinstance(model_info.get("id"), str):
         return model_info["id"]
     return None
+
+
+def _alias_ownership_matches(
+    models: tuple[Mapping[str, Any], ...],
+    *,
+    alias: str,
+    run_id: str,
+    role: str,
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+    owned: list[Mapping[str, Any]] = []
+    foreign: list[Mapping[str, Any]] = []
+    for item in models:
+        if item.get("model_name") != alias:
+            continue
+        info = item.get("model_info")
+        if (
+            isinstance(info, Mapping)
+            and info.get("pipeline_run_id") == run_id
+            and info.get("pipeline_role") == role
+        ):
+            owned.append(item)
+        else:
+            foreign.append(item)
+    return owned, foreign

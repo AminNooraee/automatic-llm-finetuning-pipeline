@@ -8,6 +8,7 @@ from fine_tuning_pipeline.orchestration.config import (
     OrchestrationConfigError,
     resolve_orchestration_config,
 )
+from fine_tuning_pipeline.gateway.contracts import GatewayCleanupError
 from fine_tuning_pipeline.orchestration.controller import (
     ControllerError,
     DockerResult,
@@ -265,6 +266,48 @@ class ControllerTests(unittest.TestCase):
             })
             self.assertEqual(value["serving"]["configured_gpu_devices"], "0")
             self.assertIsNone(value["serving"]["admission_override"])
+
+    def test_unverified_gateway_cleanup_preserves_serving_backend(self):
+        class FailedCleanupGateway:
+            def register_and_verify(self, **_kwargs):
+                raise GatewayCleanupError("gateway cleanup could not be verified")
+
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            raw = config_value()
+            raw["gateway"] = {
+                "enabled": True,
+                "base_url": "https://gateway.example",
+                "api_key": "${LITELLM_API_KEY}",
+                "registration": {
+                    "mode": "dynamic_db",
+                    "base_model_name": "gateway-base",
+                    "fine_tuned_model_name": "gateway-fine",
+                },
+                "health_check": {
+                    "enabled": True,
+                    "verify_models": True,
+                    "verify_inference": True,
+                },
+            }
+            (root / "project" / "config.yaml").write_text(
+                json.dumps(raw), encoding="utf-8"
+            )
+            execution = "exec-12345678"
+            with patch.dict(
+                "os.environ", {"LITELLM_API_KEY": "test-secret"}, clear=False
+            ), self.assertRaises(GatewayCleanupError):
+                PipelineController(
+                    docker=FakeDocker(root, execution),
+                    serving_manager_factory=FakeServingManager,
+                    gateway_manager_factory=lambda _config: FailedCleanupGateway(),
+                ).deploy(
+                    execution_id=execution, config_relative="config.yaml", layout=layout,
+                    training_image="trainer:test", training_image_id="sha256:trainer",
+                    source_revision="revision", source_identity="revision",
+                )
+            self.assertEqual(FakeServingManager.instances[0].cleaned, [])
 
     def test_selected_gpu_overrides_training_and_serving_with_provenance(self):
         with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
