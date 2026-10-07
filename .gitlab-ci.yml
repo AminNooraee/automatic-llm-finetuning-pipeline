@@ -2,6 +2,8 @@ stages:
   - smoke
   - admission-validation
   - finetune
+  - benchmark-prepare
+  - benchmark
 
 variables:
   GPU_RUNNER_TAG: "finetune-gpu"
@@ -95,6 +97,13 @@ phase1-finetune:
       esac
       mkdir -p "$CI_PROJECT_DIR/ci_artifacts/project1"
       cp "$manifests" "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json"
+    - |
+      umask 077
+      {
+        printf 'PROJECT1_UPSTREAM_PIPELINE_ID=%s\n' "$CI_PIPELINE_ID"
+        printf 'PROJECT1_UPSTREAM_JOB_ID=%s\n' "$CI_JOB_ID"
+        printf 'PROJECT1_UPSTREAM_COMMIT_SHA=%s\n' "$CI_COMMIT_SHA"
+      } > "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env"
 
   after_script:
     - rm -f "$GPU_PREFLIGHT_ENV_FILE" "$PHASE1_MANIFEST_MARKER"
@@ -102,5 +111,59 @@ phase1-finetune:
   artifacts:
     paths:
       - ci_artifacts/project1/gateway_manifest.json
+      - ci_artifacts/project1/upstream.env
     expire_in: 30 days
     when: on_success
+
+prepare-phase1-benchmark-trigger:
+  stage: benchmark-prepare
+
+  tags:
+    - $PHASE1_GPU_RUNNER_TAG
+
+  needs:
+    - job: phase1-finetune
+      artifacts: true
+
+  script:
+    - 'test -s "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json" || { echo "Missing Project 1 gateway manifest." >&2; exit 1; }'
+    - 'test -s "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env" || { echo "Missing Project 1 upstream metadata." >&2; exit 1; }'
+    - |
+      . "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env"
+      handoff_b64=$(base64 "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json" | tr -d '\r\n')
+      test -n "$handoff_b64" || { echo "Failed to encode Project 1 handoff manifest." >&2; exit 1; }
+
+      mkdir -p "$CI_PROJECT_DIR/ci_artifacts/project1"
+      umask 077
+      {
+        printf '%s\n' 'stages:'
+        printf '%s\n' '  - benchmark'
+        printf '%s\n' ''
+        printf '%s\n' 'trigger-project2-benchmark:'
+        printf '%s\n' '  stage: benchmark'
+        printf '%s\n' '  variables:'
+        printf '    PROJECT1_HANDOFF_B64: "%s"\n' "$handoff_b64"
+        printf '    PROJECT1_UPSTREAM_PIPELINE_ID: "%s"\n' "$PROJECT1_UPSTREAM_PIPELINE_ID"
+        printf '    PROJECT1_UPSTREAM_JOB_ID: "%s"\n' "$PROJECT1_UPSTREAM_JOB_ID"
+        printf '    PROJECT1_UPSTREAM_COMMIT_SHA: "%s"\n' "$PROJECT1_UPSTREAM_COMMIT_SHA"
+        printf '%s\n' '  trigger:'
+        printf '%s\n' '    project: llm-projects/automatic-llm-benchmark-pipeline'
+        printf '%s\n' '    branch: main'
+        printf '%s\n' '    strategy: depend'
+      } > "$CI_PROJECT_DIR/ci_artifacts/project1/benchmark-trigger.yml"
+      unset handoff_b64
+
+  artifacts:
+    paths:
+      - ci_artifacts/project1/benchmark-trigger.yml
+    expire_in: 30 days
+    when: on_success
+
+trigger-phase1-benchmark:
+  stage: benchmark
+
+  trigger:
+    include:
+      - artifact: ci_artifacts/project1/benchmark-trigger.yml
+        job: prepare-phase1-benchmark-trigger
+    strategy: depend
