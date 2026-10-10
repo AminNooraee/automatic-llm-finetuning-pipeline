@@ -244,7 +244,7 @@ prepare-phase1-benchmark-trigger:
         printf '    PROJECT1_BENCHMARK_FILE: "%s"\n' "$PROJECT1_BENCHMARK_FILE"
         printf '%s\n' '  trigger:'
         printf '%s\n' '    project: llm-projects/automatic-llm-benchmark-pipeline'
-        printf '%s\n' '    branch: main'
+        printf '%s\n' '    branch:  feature/user-job-input'
         printf '%s\n' '    strategy: depend'
       } > "$CI_PROJECT_DIR/ci_artifacts/project1/benchmark-trigger.yml"
       unset handoff_b64
