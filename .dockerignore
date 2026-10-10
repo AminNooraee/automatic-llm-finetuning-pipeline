@@ -47,6 +47,8 @@ configs/**
 !configs/serving_gateway_example.yaml
 !configs/full_pipeline_example.yaml
 !configs/ci_phase1.yaml
+!configs/model_catalog.yaml
+!configs/ci_infrastructure.yaml
 !examples/
 examples/**
 !examples/datasets/

@@ -95,6 +95,13 @@ class DockerSupportTests(unittest.TestCase):
             self.assertIn(rule, self.ignore_rules)
             self.assertGreater(self.ignore_rules.index(rule), deny_index)
         self.assertNotIn("!scripts/*.py", self.ignore_rules)
+        config_deny_index = self.ignore_rules.index("configs/**")
+        required_configs = ("model_catalog.yaml", "ci_infrastructure.yaml")
+        for name in required_configs:
+            rule = f"!configs/{name}"
+            self.assertIn(rule, self.ignore_rules)
+            self.assertGreater(self.ignore_rules.index(rule), config_deny_index)
+        self.assertNotIn("!configs/*.yaml", self.ignore_rules)
         self.assertIn("!tests/*.py", self.ignore_rules)
         self.assertIn("COPY scripts/ ./scripts/", self.dockerfile)
         host_dns_dockerfile = (
@@ -106,18 +113,25 @@ class DockerSupportTests(unittest.TestCase):
             context = Path(temporary)
             (context / "scripts").mkdir()
             (context / "tests").mkdir()
+            (context / "configs").mkdir()
             for name in required:
                 shutil.copy2(REPOSITORY_ROOT / "scripts" / name, context / "scripts" / name)
+            for name in required_configs:
+                shutil.copy2(REPOSITORY_ROOT / "configs" / name, context / "configs" / name)
             for name in ("__init__.py", "test_user_job.py"):
                 shutil.copy2(REPOSITORY_ROOT / "tests" / name, context / "tests" / name)
+            shutil.copy2(REPOSITORY_ROOT / ".gitlab-ci.yml", context / ".gitlab-ci.yml")
             code = (
-                "import pathlib, sys; sys.path.insert(0, '.'); "
+                "import pathlib, sys, unittest; sys.path.insert(0, '.'); "
                 "import tests.test_user_job as test; "
                 "import scripts.prepare_ci_job as prepare; "
                 "import scripts.validate_prepared_train as validate; "
                 "root = pathlib.Path.cwd().resolve(); "
                 "assert all(pathlib.Path(module.__file__).resolve().is_relative_to(root) "
-                "for module in (test, prepare, validate))"
+                "for module in (test, prepare, validate)); "
+                "suite = unittest.defaultTestLoader.loadTestsFromModule(test); "
+                "result = unittest.TextTestRunner(verbosity=0).run(suite); "
+                "sys.exit(not result.wasSuccessful())"
             )
             result = subprocess.run(
                 [sys.executable, "-c", code], cwd=context,
