@@ -2,6 +2,10 @@
 
 import json
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -82,6 +86,44 @@ class DockerSupportTests(unittest.TestCase):
         for rule in ("**/__pycache__", "**/tmp*", "**/.env.*", "**/*.safetensors", "**/*.log"):
             self.assertIn(rule, self.ignore_rules)
         self.assertNotIn("!docker/configure-build-dns.sh", self.ignore_rules)
+
+    def test_user_job_modules_are_in_build_context_allowlist(self):
+        required = ("prepare_ci_job.py", "validate_prepared_train.py")
+        deny_index = self.ignore_rules.index("scripts/**")
+        for name in required:
+            rule = f"!scripts/{name}"
+            self.assertIn(rule, self.ignore_rules)
+            self.assertGreater(self.ignore_rules.index(rule), deny_index)
+        self.assertNotIn("!scripts/*.py", self.ignore_rules)
+        self.assertIn("!tests/*.py", self.ignore_rules)
+        self.assertIn("COPY scripts/ ./scripts/", self.dockerfile)
+        host_dns_dockerfile = (
+            REPOSITORY_ROOT / "docker" / "Dockerfile.host-dns"
+        ).read_text(encoding="utf-8")
+        self.assertIn("COPY scripts/ ./scripts/", host_dns_dockerfile)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            context = Path(temporary)
+            (context / "scripts").mkdir()
+            (context / "tests").mkdir()
+            for name in required:
+                shutil.copy2(REPOSITORY_ROOT / "scripts" / name, context / "scripts" / name)
+            for name in ("__init__.py", "test_user_job.py"):
+                shutil.copy2(REPOSITORY_ROOT / "tests" / name, context / "tests" / name)
+            code = (
+                "import pathlib, sys; sys.path.insert(0, '.'); "
+                "import tests.test_user_job as test; "
+                "import scripts.prepare_ci_job as prepare; "
+                "import scripts.validate_prepared_train as validate; "
+                "root = pathlib.Path.cwd().resolve(); "
+                "assert all(pathlib.Path(module.__file__).resolve().is_relative_to(root) "
+                "for module in (test, prepare, validate))"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", code], cwd=context,
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,8 @@ tests/**
 !scripts/
 scripts/**
 !scripts/*.sh
+!scripts/prepare_ci_job.py
+!scripts/validate_prepared_train.py
 
 # Final exclusions also protect files nested within an allowed source directory.
 **/__pycache__
