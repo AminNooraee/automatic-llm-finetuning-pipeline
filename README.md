@@ -377,25 +377,20 @@ export HF_TOKEN='runtime-value' # only when the model requires it
 sh scripts/run_pipeline.sh
 ```
 
-Image builds use `PIPELINE_DOCKER_BUILD_NETWORK=auto` by default: the normal
-Docker build network is tried first, and a recognized DNS/network-resolution
-failure is retried once with host build networking. Supported modes are exactly
-`auto`, `default`, `host`, and `host-dns`. `default` disables fallback; `host`
-uses host networking immediately; `host-dns` skips both probes and directly uses
-host networking with a temporary validated DNS build context.
-This setting affects image builds only; host build networking reduces build-time
-network isolation and does not change container runtime networking.
+Image builds always use `host-dns`. If `PIPELINE_DOCKER_BUILD_NETWORK` is unset,
+the launcher selects `host-dns`; any other explicit value fails before Docker
+access. Each controller and trainer build uses host build networking and a
+temporary validated DNS build context. This affects image builds only and does
+not change container runtime networking.
 
-If BuildKit still reports DNS resolution failure with host build networking,
-`auto` performs one final build using validated non-loopback resolver IPs read
-from the host's `/etc/resolv.conf`. `PIPELINE_DOCKER_BUILD_DNS` can explicitly
-supply a comma- or space-separated IPv4/IPv6 list. The launcher generates a
-mode-0700 temporary named build context outside the repository containing only a mode-0644
-`resolv.conf`; DNS-recovery Dockerfiles bind it over `/etc/resolv.conf` only for
-networked `RUN` steps. The context is removed after success, failure, or signal.
-No resolver is invented, no resolver configuration is baked into an image, the
-host file and Docker daemon configuration are never modified, Docker is not
-restarted, and no custom Buildx builder is created.
+The launcher reads validated non-loopback resolver IPs from the host's
+`/etc/resolv.conf`, or accepts a strictly validated comma- or space-separated
+IPv4/IPv6 list in `PIPELINE_DOCKER_BUILD_DNS`. It generates a mode-0700
+temporary named build context outside the repository containing only a mode-0644
+`resolv.conf`. The host-DNS Dockerfiles bind it over `/etc/resolv.conf` only
+for networked `RUN` steps. The context is removed after success, failure, or
+signal. No resolver is invented, and neither the host resolver file nor Docker
+daemon configuration is modified.
 
 Local datasets inside the checkout work with the default mount. For datasets in
 an external directory, export `PIPELINE_DATASETS_DIR` as that directory's

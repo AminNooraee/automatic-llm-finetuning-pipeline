@@ -318,33 +318,22 @@ Trainer tags also include the invoking host UID/GID, which are supplied as the
 existing non-secret image user build arguments so writable bind mounts do not
 silently depend on UID 1000.
 
-`PIPELINE_DOCKER_BUILD_NETWORK` controls only the controller and trainer image
-builds. It accepts exactly `auto`, `default`, `host`, and `host-dns`. Its default,
-`auto`, tries normal Docker build networking first and
-retries once with `docker build --network=host` only when the captured failure
-contains a recognized DNS/network-resolution error. `default` disables that
-fallback; `host` uses host build networking immediately. `host-dns` immediately
-uses host networking with the temporary DNS context, skipping both probes. Host mode reduces
-build-network isolation, so use it only where the operator accepts that tradeoff.
-The setting never adds host networking to training, serving, or gateway runtime
-containers, and matching cached images are still reused without a probe build.
+`PIPELINE_DOCKER_BUILD_NETWORK` controls only controller and trainer image
+builds and accepts only `host-dns`. Unset also selects `host-dns`; every other
+explicit value fails before Docker access. Each build uses
+`docker build --network=host` with a named `pipeline_dns` context and the
+corresponding `.host-dns` Dockerfile. Matching cached images are still reused.
+This setting does not change training, serving, or gateway runtime networking.
 
-Some BuildKit installations do not propagate usable host resolvers even with
-host build networking. In `auto` mode, a second recognized DNS failure permits
-one final host-network build with a named `pipeline_dns` context. The launcher
-reads ordered `nameserver` entries from
-`/etc/resolv.conf`, removes duplicates, rejects malformed and loopback/stub
-addresses, and fails rather than inventing a public resolver. Operators may set
+The launcher reads ordered `nameserver` entries from `/etc/resolv.conf`,
+removes duplicates, rejects malformed and loopback/stub addresses, and fails
+rather than inventing a public resolver. Operators may set
 `PIPELINE_DOCKER_BUILD_DNS` to a strictly validated comma- or space-separated
-IPv4/IPv6 list to select the resolvers used at this final stage.
-
-The launcher writes only normalized `nameserver` lines to a mode-0644 file in a
-mode-0700 temporary directory outside the repository. Recovery-specific Dockerfiles bind-mount that file
-over `/etc/resolv.conf` for every networked `RUN`; ordinary Dockerfiles do not
-reference the context. Cleanup occurs after success, failure, and signals. This
-does not edit the host's `/etc/resolv.conf`, `/etc/docker/daemon.json`, or daemon
-state, does not restart Docker or create a custom Buildx builder, does not bake
-DNS into the image, and does not change controller or LiteLLM runtime networking.
+IPv4/IPv6 list instead. The launcher writes only normalized `nameserver`
+lines to a mode-0644 file in a mode-0700 temporary directory outside the
+repository. The host-DNS Dockerfiles bind-mount that file over
+`/etc/resolv.conf` for every networked `RUN`. Cleanup occurs after success,
+failure, and signals. The host resolver file and Docker daemon are not changed.
 
 Runtime DNS for the owned trainer and vLLM containers is a distinct per-container
 setting. The launcher validates and normalizes either

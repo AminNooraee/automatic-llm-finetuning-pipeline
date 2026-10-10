@@ -9,14 +9,11 @@ case "$RESOURCE_PREFLIGHT" in
     0|1) ;;
     *) echo "PIPELINE_RESOURCE_PREFLIGHT must be 0 or 1." >&2; exit 2 ;;
 esac
-DOCKER_BUILD_NETWORK=${PIPELINE_DOCKER_BUILD_NETWORK:-auto}
-case "$DOCKER_BUILD_NETWORK" in
-    auto|default|host|host-dns) ;;
-    *)
-        echo "PIPELINE_DOCKER_BUILD_NETWORK must be one of: auto, default, host, host-dns." >&2
-        exit 2
-        ;;
-esac
+DOCKER_BUILD_NETWORK=${PIPELINE_DOCKER_BUILD_NETWORK-host-dns}
+if [ "$DOCKER_BUILD_NETWORK" != host-dns ]; then
+    echo "PIPELINE_DOCKER_BUILD_NETWORK must be host-dns." >&2
+    exit 2
+fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --rebuild) REBUILD=1 ;;
@@ -154,36 +151,17 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-build_failure_is_network_resolution() {
-    grep -Eiq \
-        'Temporary failure resolving|Could not resolve|Name or service not known|Network is unreachable|failure resolving|DNS resolution' \
-        "$1"
-}
-
 run_docker_build_attempt() {
-    build_network=$1
-    build_dockerfile=$2
-    build_dns_context=$3
-    shift 3
+    build_dockerfile=$1
+    build_dns_context=$2
+    shift 2
     BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/automatic-llm-build.XXXXXX")
     chmod 600 "$BUILD_LOG"
     build_status=0
-    if [ -n "$build_dns_context" ]; then
-        docker build --network=host \
-            --build-context "pipeline_dns=$build_dns_context" \
-            --file "$build_dockerfile" "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
-    elif [ "$build_network" = host ]; then
-        docker build --network=host --file "$build_dockerfile" \
-            "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
-    else
-        docker build --file "$build_dockerfile" \
-            "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
-    fi
+    docker build --network=host \
+        --build-context "pipeline_dns=$build_dns_context" \
+        --file "$build_dockerfile" "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
     cat "$BUILD_LOG"
-    BUILD_FAILURE_WAS_NETWORK=0
-    if [ "$build_status" -ne 0 ] && build_failure_is_network_resolution "$BUILD_LOG"; then
-        BUILD_FAILURE_WAS_NETWORK=1
-    fi
     rm -f -- "$BUILD_LOG"
     BUILD_LOG=
     return "$build_status"
@@ -246,73 +224,21 @@ prepare_dns_context() {
 }
 
 run_host_dns_build() {
-    recovery_dockerfile=$1
-    output_mode=$2
-    shift 2
+    build_dockerfile=$1
+    shift
     prepare_dns_context || return $?
-    if [ "$output_mode" = explicit ]; then
-        echo "Docker build mode: host-dns"
-        echo "Using validated host DNS resolvers: $BUILD_DNS_RESOLVERS"
-    else
-        echo "Host build networking still cannot resolve package repositories." >&2
-        echo "Retrying once with host DNS build context using validated resolvers: $BUILD_DNS_RESOLVERS" >&2
-    fi
+    echo "Docker build mode: host-dns"
+    echo "Using validated host DNS resolvers: $BUILD_DNS_RESOLVERS"
     dns_build_status=0
-    run_docker_build_attempt host "$recovery_dockerfile" "$DNS_CONTEXT_DIR" "$@" || dns_build_status=$?
+    run_docker_build_attempt "$build_dockerfile" "$DNS_CONTEXT_DIR" "$@" || dns_build_status=$?
     cleanup_dns_context
     return "$dns_build_status"
-}
-
-run_docker_build() {
-    normal_dockerfile=$1
-    recovery_dockerfile=$2
-    shift 2
-    case "$DOCKER_BUILD_NETWORK" in
-        default)
-            run_docker_build_attempt default "$normal_dockerfile" "" "$@"
-            ;;
-        host)
-            echo "Docker build is using explicitly configured host networking."
-            run_docker_build_attempt host "$normal_dockerfile" "" "$@"
-            ;;
-        host-dns)
-            run_host_dns_build "$recovery_dockerfile" explicit "$@"
-            ;;
-        auto)
-            if run_docker_build_attempt default "$normal_dockerfile" "" "$@"; then
-                return 0
-            else
-                first_status=$?
-            fi
-            if [ "$BUILD_FAILURE_WAS_NETWORK" -ne 1 ]; then
-                return "$first_status"
-            fi
-            echo "Docker build failed due to a network/DNS resolution error." >&2
-            echo "Retrying once with host build networking..." >&2
-            if run_docker_build_attempt host "$normal_dockerfile" "" "$@"; then
-                return 0
-            else
-                host_status=$?
-            fi
-            if [ "$BUILD_FAILURE_WAS_NETWORK" -ne 1 ]; then
-                return "$host_status"
-            fi
-            run_host_dns_build "$recovery_dockerfile" fallback "$@" || {
-                dns_status=$?
-                if [ "$dns_status" -eq 2 ]; then
-                    return "$host_status"
-                fi
-                return "$dns_status"
-            }
-            ;;
-    esac
 }
 
 ensure_image() {
     image=$1
     dockerfile=$2
-    recovery_dockerfile=$3
-    runtime=$4
+    runtime=$3
     existing=$(docker image inspect --format '{{index .Config.Labels "fine-tuning-pipeline.source-identity"}}' "$image" 2>/dev/null || true)
     if [ "$REBUILD" -eq 0 ] && [ "$existing" = "$SOURCE_IDENTITY" ]; then
         echo "Reusing image $image"
@@ -333,13 +259,11 @@ ensure_image() {
     set -- "$@" \
         --build-arg "SOURCE_REVISION=$SOURCE_REVISION" \
         --build-arg "SOURCE_IDENTITY=$SOURCE_IDENTITY" "$PROJECT_DIR"
-    run_docker_build "$dockerfile" "$recovery_dockerfile" "$@"
+    run_host_dns_build "$dockerfile" "$@"
 }
 
-ensure_image "$CONTROLLER_IMAGE" "$PROJECT_DIR/docker/Dockerfile.controller" \
-    "$PROJECT_DIR/docker/Dockerfile.controller.host-dns" ""
-ensure_image "$TRAINING_IMAGE" "$PROJECT_DIR/docker/Dockerfile" \
-    "$PROJECT_DIR/docker/Dockerfile.host-dns" cuda
+ensure_image "$CONTROLLER_IMAGE" "$PROJECT_DIR/docker/Dockerfile.controller.host-dns" ""
+ensure_image "$TRAINING_IMAGE" "$PROJECT_DIR/docker/Dockerfile.host-dns" cuda
 TRAINING_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$TRAINING_IMAGE")
 
 SECRET_DIR=$(mktemp -d "${TMPDIR:-/tmp}/automatic-llm-secrets.XXXXXX")

@@ -171,7 +171,7 @@ exit 1
 
     def run_launcher(
         self, *, mode=None, scenario="success", reuse=False, rebuild=False,
-        failure_message=None, build_dns=None,
+        failure_message=None, build_dns="192.0.2.53",
         runtime_dns="192.0.2.55 2001:db8::55",
         selected_gpu=None, cuda_visible_devices=None,
         serving_advertise_host=None,
@@ -225,28 +225,24 @@ exit 1
     def contexts(self):
         return self.context_log.read_text(encoding="utf-8").splitlines() if self.context_log.exists() else []
 
-    def test_default_environment_is_auto_and_success_has_no_retry(self):
-        result = self.run_launcher()
+    def test_default_environment_directly_uses_host_dns(self):
+        result = self.run_launcher(build_dns="192.0.2.53")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(self.builds()), 2)
-        self.assertTrue(all("--network=host" not in line for line in self.builds()))
-        self.assertNotIn("Retrying once", result.stderr)
+        self.assertTrue(all("--network=host" in line for line in self.builds()))
+        self.assertTrue(all("--build-context pipeline_dns=" in line for line in self.builds()))
+        self.assertTrue(all(".host-dns" in line for line in self.builds()))
+        self.assertNotIn("Retrying", result.stderr)
 
-    def test_accepted_modes_are_exact(self):
-        for mode in ("auto", "default", "host", "host-dns"):
-            with self.subTest(mode=mode):
-                result = self.run_launcher(mode=mode, build_dns="192.0.2.53")
-                self.assertEqual(result.returncode, 0, result.stderr)
-        for mode in ("bridge", "HOST", "host_dns", "auto "):
+    def test_only_host_dns_mode_is_accepted(self):
+        result = self.run_launcher(mode="host-dns", build_dns="192.0.2.53")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for mode in ("", "auto", "default", "host", "bridge", "HOST", "host_dns", "auto "):
             with self.subTest(mode=mode):
                 result = self.run_launcher(mode=mode)
                 self.assertEqual(result.returncode, 2)
-
-    def test_invalid_mode_is_rejected_before_docker_access(self):
-        result = self.run_launcher(mode="bridge")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("must be one of: auto, default, host, host-dns", result.stderr)
-        self.assertEqual(self.commands(), [])
+                self.assertIn("PIPELINE_DOCKER_BUILD_NETWORK must be host-dns.", result.stderr)
+                self.assertEqual(self.commands(), [])
 
     def test_selected_gpu_absent_is_not_forwarded(self):
         result = self.run_launcher()
@@ -303,33 +299,17 @@ exit 1
                 self.assertEqual(self.commands(), [])
                 self.assertFalse(marker.exists())
 
-    def test_auto_dns_failure_retries_each_image_once_and_continues(self):
-        result = self.run_launcher(scenario="dns_then_success")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.builds()), 4)
-        self.assertEqual(sum("--network=host" in line for line in self.builds()), 2)
-        self.assertEqual(self.contexts(), [])
-
-    def test_auto_failed_host_retry_with_unrelated_error_stops(self):
-        result = self.run_launcher(scenario="dns_host_fail")
-        self.assertEqual(result.returncode, 9)
-        self.assertEqual(len(self.builds()), 2)
-        self.assertEqual(self.contexts(), [])
-
-    def test_auto_host_dns_failure_uses_exactly_three_attempts_per_image(self):
-        result = self.run_launcher(
-            scenario="dns_third_success", build_dns="192.0.2.53,2001:db8::53"
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.builds()), 6)
-        injected = [line for line in self.builds() if "--build-context pipeline_dns=" in line]
-        self.assertEqual(len(injected), 2)
-        self.assertTrue(all("--network=host" in line and ".host-dns" in line for line in injected))
+    def test_dns_failure_does_not_try_another_build_mode(self):
+        result = self.run_launcher(scenario="dns")
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(len(self.builds()), 1)
+        self.assertTrue(all("--build-context pipeline_dns=" in line for line in self.builds()))
+        self.assertFalse(any(line.startswith("run ") for line in self.commands()))
 
     def test_dns_context_build_failure_returns_real_status(self):
         result = self.run_launcher(scenario="dns_third_fail", build_dns="192.0.2.53")
         self.assertEqual(result.returncode, 11)
-        self.assertEqual(len(self.builds()), 3)
+        self.assertEqual(len(self.builds()), 1)
         self.assertFalse(any(line.startswith("run ") for line in self.commands()))
 
     def test_invalid_explicit_dns_is_rejected_without_build_or_shell_execution(self):
@@ -367,36 +347,18 @@ exit 1
         self.assertEqual(result.returncode, 2)
         self.assertEqual(self.builds(), [])
 
-    def test_auto_unrelated_default_failure_does_not_retry(self):
+    def test_unrelated_build_failure_does_not_retry(self):
         for message in (
             "Dockerfile syntax error", "COPY failed: file not found",
             "ResolutionImpossible: dependency conflict", "permission denied",
         ):
             with self.subTest(message=message):
-                result = self.run_launcher(scenario="unrelated", failure_message=message)
+                result = self.run_launcher(
+                    scenario="unrelated", failure_message=message, build_dns="192.0.2.53"
+                )
                 self.assertEqual(result.returncode, 6)
                 self.assertEqual(len(self.builds()), 1)
-
-    def test_default_mode_is_exactly_one_normal_attempt(self):
-        result = self.run_launcher(mode="default", scenario="dns")
-        self.assertEqual(result.returncode, 7)
-        self.assertEqual(len(self.builds()), 1)
-        self.assertNotIn("--network=host", self.builds()[0])
-        self.assertNotIn("--build-context", self.builds()[0])
-
-    def test_host_mode_is_exactly_one_host_attempt_per_image(self):
-        result = self.run_launcher(mode="host")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.builds()), 2)
-        self.assertTrue(all("--network=host" in line for line in self.builds()))
-        self.assertTrue(all("--build-context" not in line for line in self.builds()))
-
-    def test_host_mode_dns_failure_never_uses_context_fallback(self):
-        result = self.run_launcher(mode="host", scenario="dns")
-        self.assertEqual(result.returncode, 7)
-        self.assertEqual(len(self.builds()), 1)
-        self.assertIn("--network=host", self.builds()[0])
-        self.assertNotIn("--build-context", self.builds()[0])
+                self.assertIn("--build-context pipeline_dns=", self.builds()[0])
 
     def test_host_dns_directly_uses_context_without_probe(self):
         result = self.run_launcher(mode="host-dns", build_dns="192.0.2.53")
@@ -410,7 +372,7 @@ exit 1
     def test_host_dns_directly_discovers_dns_when_no_override_is_set(self):
         with (self.root / "scripts/build_dns.sh").open("a", encoding="utf-8") as helper:
             helper.write("\ndiscover_build_dns() { printf '%s\\n' '192.0.2.54 2001:db8::54'; }\n")
-        result = self.run_launcher(mode="host-dns")
+        result = self.run_launcher(mode="host-dns", build_dns=None)
         self.assertEqual(result.returncode, 0, result.stderr)
         evidence = self.evidence.read_text(encoding="utf-8")
         self.assertIn("content=nameserver 192.0.2.54", evidence)
@@ -420,17 +382,17 @@ exit 1
     def test_host_dns_without_a_usable_discovered_resolver_fails_before_build(self):
         with (self.root / "scripts/build_dns.sh").open("a", encoding="utf-8") as helper:
             helper.write("\ndiscover_build_dns() { return 2; }\n")
-        result = self.run_launcher(mode="host-dns")
+        result = self.run_launcher(mode="host-dns", build_dns=None)
         self.assertEqual(result.returncode, 2)
         self.assertIn("No usable non-loopback DNS resolver", result.stderr)
         self.assertEqual(self.builds(), [])
 
-    def test_auto_preserves_host_failure_status_when_no_resolver_is_discovered(self):
+    def test_no_resolver_prevents_any_build(self):
         with (self.root / "scripts/build_dns.sh").open("a", encoding="utf-8") as helper:
             helper.write("\ndiscover_build_dns() { return 2; }\n")
-        result = self.run_launcher(scenario="dns_third_success")
-        self.assertEqual(result.returncode, 8)
-        self.assertEqual(len(self.builds()), 2)
+        result = self.run_launcher(build_dns=None)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.builds(), [])
         self.assertEqual(self.contexts(), [])
 
     def test_host_dns_generates_normalized_nameserver_only_context(self):
