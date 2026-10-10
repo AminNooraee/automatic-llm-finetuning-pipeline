@@ -23,9 +23,42 @@ prepare-user-job:
       PREPARE_IMAGE="automatic-llm-job-preparer:$CI_COMMIT_SHA"
 
       echo "=== PREPARING USER JOB ==="
+      echo "Docker build mode: host-dns"
+
+      . "$CI_PROJECT_DIR/scripts/build_dns.sh"
+
+      if [ -n "${PIPELINE_DOCKER_BUILD_DNS:-}" ]; then
+        BUILD_DNS_RESOLVERS=$(normalize_build_dns "$PIPELINE_DOCKER_BUILD_DNS" strict) || {
+          echo "Invalid PIPELINE_DOCKER_BUILD_DNS." >&2
+          exit 2
+        }
+      else
+        BUILD_DNS_RESOLVERS=$(discover_build_dns /etc/resolv.conf) || {
+          echo "No usable DNS resolver found on host." >&2
+          exit 2
+        }
+      fi
+
+      echo "Using host DNS resolvers: $BUILD_DNS_RESOLVERS"
+
+      DNS_CONTEXT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/job-preparer-dns.XXXXXX")
+      chmod 700 "$DNS_CONTEXT_DIR"
+
+      cleanup() {
+        rm -rf -- "$DNS_CONTEXT_DIR"
+      }
+      trap cleanup EXIT HUP INT TERM
+
+      : > "$DNS_CONTEXT_DIR/resolv.conf"
+      for resolver in $BUILD_DNS_RESOLVERS; do
+        printf 'nameserver %s\n' "$resolver" >> "$DNS_CONTEXT_DIR/resolv.conf"
+      done
+      chmod 644 "$DNS_CONTEXT_DIR/resolv.conf"
 
       docker build \
-        -f docker/Dockerfile.controller \
+        --network=host \
+        --build-context "pipeline_dns=$DNS_CONTEXT_DIR" \
+        -f docker/Dockerfile.controller.host-dns \
         --build-arg "SOURCE_REVISION=$CI_COMMIT_SHA" \
         --build-arg "SOURCE_IDENTITY=$CI_COMMIT_SHA-job-preparer" \
         -t "$PREPARE_IMAGE" \
