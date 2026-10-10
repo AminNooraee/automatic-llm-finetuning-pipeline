@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import re
 import shutil
 import sys
 from pathlib import Path, PurePosixPath
@@ -12,6 +14,14 @@ import yaml
 
 class JobConfigError(ValueError):
     pass
+
+
+# Local formats supported by the fine-tuning source adapters.
+TRAIN_EXTENSIONS = frozenset(
+    {".json", ".jsonl", ".ndjson", ".csv", ".parquet", ".pq", ".txt", ".chatml"}
+)
+# Formats accepted by the downstream benchmark project.
+BENCHMARK_EXTENSIONS = frozenset({".json", ".jsonl", ".csv", ".parquet"})
 
 
 def load_yaml(path: Path, label: str) -> dict:
@@ -47,13 +57,15 @@ def require_positive_int(value, label: str) -> int:
 
 
 def require_positive_number(value, label: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or value <= 0
-    ):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise JobConfigError(f"{label} must be a positive number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        raise JobConfigError(f"{label} must be a positive number") from None
+    if not math.isfinite(number) or number <= 0:
+        raise JobConfigError(f"{label} must be a positive number")
+    return number
 
 
 def safe_relative_path(value, label: str) -> PurePosixPath:
@@ -63,6 +75,9 @@ def safe_relative_path(value, label: str) -> PurePosixPath:
         raise JobConfigError(
             f"{label} must use '/' instead of Windows backslashes"
         )
+
+    if any(part in {"", ".", ".."} for part in text.split("/")) or ":" in text.split("/")[0]:
+        raise JobConfigError(f"{label} must be a normalized relative path")
 
     path = PurePosixPath(text)
 
@@ -99,6 +114,16 @@ def resolve_job_file(job_dir: Path, value, label: str) -> Path:
     return target
 
 
+def require_extension(path: Path, extensions: frozenset[str], label: str) -> str:
+    suffix = path.suffix.lower()
+    if suffix not in extensions:
+        raise JobConfigError(
+            f"{label} has an unsupported extension; "
+            f"expected one of: {', '.join(sorted(extensions))}"
+        )
+    return suffix
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
@@ -113,7 +138,7 @@ def sha256_file(path: Path) -> str:
 
 
 def reject_unknown(mapping: dict, allowed: set[str], label: str) -> None:
-    unknown = sorted(set(mapping) - allowed)
+    unknown = sorted(str(key) for key in mapping if key not in allowed)
 
     if unknown:
         raise JobConfigError(
@@ -140,7 +165,7 @@ def prepare_job(
         "job",
     )
 
-    if job.get("schema_version") != 1:
+    if type(job.get("schema_version")) is not int or job["schema_version"] != 1:
         raise JobConfigError("schema_version must be 1")
 
     # ---------------------------------------------------------
@@ -159,6 +184,9 @@ def prepare_job(
         job_section.get("name"),
         "job.name",
     )
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", job_name):
+        raise JobConfigError("job.name must be 1-63 safe ASCII characters")
 
     # ---------------------------------------------------------
     # Model
@@ -241,6 +269,11 @@ def prepare_job(
             "Training and benchmark datasets must be different files"
         )
 
+    train_suffix = require_extension(train_source, TRAIN_EXTENSIONS, "datasets.train.path")
+    benchmark_suffix = require_extension(
+        benchmark_source, BENCHMARK_EXTENSIONS, "datasets.benchmark.path"
+    )
+
     # ---------------------------------------------------------
     # Training parameters
     # ---------------------------------------------------------
@@ -304,17 +337,14 @@ def prepare_job(
     )
 
     dropout = lora.get("dropout")
-
-    if (
-        isinstance(dropout, bool)
-        or not isinstance(dropout, (int, float))
-        or not 0 <= float(dropout) < 1
-    ):
-        raise JobConfigError(
-            "training.lora.dropout must be >= 0 and < 1"
-        )
-
-    dropout = float(dropout)
+    if isinstance(dropout, bool) or not isinstance(dropout, (int, float)):
+        raise JobConfigError("training.lora.dropout must be >= 0 and < 1")
+    try:
+        dropout = float(dropout)
+    except OverflowError:
+        raise JobConfigError("training.lora.dropout must be >= 0 and < 1") from None
+    if not math.isfinite(dropout) or not 0 <= dropout < 1:
+        raise JobConfigError("training.lora.dropout must be >= 0 and < 1")
 
     # ---------------------------------------------------------
     # Internal model catalog
@@ -426,9 +456,6 @@ def prepare_job(
         parents=True,
         exist_ok=False,
     )
-
-    train_suffix = train_source.suffix.lower()
-    benchmark_suffix = benchmark_source.suffix.lower()
 
     train_destination = (
         output_dir / f"train{train_suffix}"

@@ -27,6 +27,20 @@ This project supplies the preparation, compatibility, configuration, and run
 lifecycle around it; it does not implement a new trainer or replace the upstream
 project. LoRA output is an adapter used together with its original base model.
 
+## GitLab user job input
+
+For the GitLab job flow, put `job.yaml` and the dataset files in `job/`.
+Training files may use `.json`, `.jsonl`, `.ndjson`, `.csv`, `.parquet`,
+`.pq`, `.txt`, or `.chatml`; the training source adapters handle these formats.
+Benchmark files may use `.json`, `.jsonl`, `.csv`, or `.parquet`, as accepted
+by the downstream benchmark project. Dataset paths in `job.yaml` must be
+normalized relative paths beneath `job/`.
+
+The preparer writes the exact copied dataset names, SHA-256 hashes, and generated
+configuration name to `ci_artifacts/job/job_manifest.json`. The selected model
+must appear in `configs/model_catalog.yaml`; its parameter count, precision,
+and attention backend come from that catalog.
+
 ## Architecture
 
 ```text
