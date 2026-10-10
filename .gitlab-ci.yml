@@ -1,4 +1,5 @@
 stages:
+  - job-prepare
   - smoke
   - admission-validation
   - finetune
@@ -8,6 +9,43 @@ stages:
 variables:
   GPU_RUNNER_TAG: "finetune-gpu"
   PHASE1_GPU_RUNNER_TAG: "worker-server53"
+
+prepare-user-job:
+  stage: job-prepare
+
+  tags:
+    - $PHASE1_GPU_RUNNER_TAG
+
+  script:
+    - |
+      set -eu
+
+      PREPARE_IMAGE="automatic-llm-job-preparer:$CI_COMMIT_SHA"
+
+      echo "=== PREPARING USER JOB ==="
+
+      docker build \
+        -f docker/Dockerfile.controller \
+        --build-arg "SOURCE_REVISION=$CI_COMMIT_SHA" \
+        --build-arg "SOURCE_IDENTITY=$CI_COMMIT_SHA-job-preparer" \
+        -t "$PREPARE_IMAGE" \
+        .
+
+      docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        --mount "type=bind,src=$CI_PROJECT_DIR,dst=/workspace" \
+        --workdir /workspace \
+        "$PREPARE_IMAGE" \
+        python scripts/prepare_ci_job.py
+
+      echo "=== USER JOB PREPARED ==="
+
+  artifacts:
+    paths:
+      - ci_artifacts/job/
+    expire_in: 30 days
+    when: on_success
+
 
 gpu-runner-smoke-test:
   stage: smoke
@@ -60,8 +98,10 @@ phase1-finetune:
   tags:
     - $PHASE1_GPU_RUNNER_TAG
 
+
+
   variables:
-    PIPELINE_CONFIG: "configs/ci_phase1.yaml"
+    PIPELINE_CONFIG: "ci_artifacts/job/finetune.yaml"
     PIPELINE_RESOURCE_PREFLIGHT: "1"
     GPU_DEVICE: "auto"
     GPU_PREFLIGHT_ENV_FILE: "$CI_PROJECT_DIR/.phase1-gpu.env"
@@ -72,13 +112,17 @@ phase1-finetune:
 
   script:
     - 'test -n "${SERVING_ADVERTISE_HOST:-}" || { echo "SERVING_ADVERTISE_HOST must be supplied explicitly." >&2; exit 1; }'
-    - 'test -n "${PIPELINE_DATASETS_DIR:-}" || { echo "PIPELINE_DATASETS_DIR must be supplied explicitly." >&2; exit 1; }'
     - 'test -n "${PIPELINE_RUNS_DIR:-}" || { echo "PIPELINE_RUNS_DIR must be supplied explicitly." >&2; exit 1; }'
     - 'test -n "${PIPELINE_HF_CACHE_DIR:-}" || { echo "PIPELINE_HF_CACHE_DIR must be supplied explicitly." >&2; exit 1; }'
     - 'test -n "${PIPELINE_STATE_DIR:-}" || { echo "PIPELINE_STATE_DIR must be supplied explicitly." >&2; exit 1; }'
     - 'test -n "${LITELLM_BASE_URL:-}" || { echo "LITELLM_BASE_URL must be supplied explicitly." >&2; exit 1; }'
     - 'test -n "${LITELLM_API_KEY:-}" || { echo "LITELLM_API_KEY must be supplied explicitly." >&2; exit 1; }'
-    - 'test -f "$PIPELINE_DATASETS_DIR/phase1_train.json" && test -r "$PIPELINE_DATASETS_DIR/phase1_train.json" || { echo "Dataset must be a readable regular file: $PIPELINE_DATASETS_DIR/phase1_train.json" >&2; exit 1; }'
+
+    - export PIPELINE_DATASETS_DIR="$CI_PROJECT_DIR/ci_artifacts/job"
+
+    - 'test -r "$CI_PROJECT_DIR/$PIPELINE_CONFIG" || { echo "Generated fine-tune config is missing." >&2; exit 1; }'
+    - 'test -r "$PIPELINE_DATASETS_DIR/train.json" || { echo "Generated training dataset is missing." >&2; exit 1; }'
+
     - |
       for directory in "$PIPELINE_RUNS_DIR" "$PIPELINE_HF_CACHE_DIR" "$PIPELINE_STATE_DIR"; do
         test -d "$directory" || { echo "Required directory does not exist: $directory" >&2; exit 1; }

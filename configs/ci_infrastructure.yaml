@@ -1,0 +1,71 @@
+schema_version: 1
+
+training_defaults:
+  method: lora
+  gradient_checkpointing: false
+  save_steps: 10
+  logging_steps: 1
+
+resource_preflight:
+  enabled: true
+  activation_bytes_per_token: 1048576
+  safety_margin_percent: 25
+
+orchestration:
+  enabled: true
+  training:
+    gpu_devices: "0"
+  cleanup_on_failure: true
+
+serving:
+  enabled: true
+  backend: vllm
+  runtime: docker
+  bind_host: 0.0.0.0
+  advertise_host: ${SERVING_ADVERTISE_HOST}
+  port: auto
+  port_range:
+    start: 8101
+    end: 8199
+  base_model_name: auto
+  fine_tuned_model_name: auto
+  container_name: auto
+  restart_policy: unless-stopped
+
+  vllm:
+    image: vllm/vllm-openai:v0.11.0
+    gpu_devices: "0"
+    gpu_memory_utilization: 0.10
+    max_model_len: 4096
+    max_num_seqs: 2
+
+  health_check:
+    enabled: true
+    timeout_seconds: 180
+    interval_seconds: 2
+
+gateway:
+  enabled: true
+  provider: litellm
+  base_url: ${LITELLM_BASE_URL}
+  api_key: ${LITELLM_API_KEY}
+  allow_insecure_http: true
+  allow_local_backend: false
+
+  registration:
+    mode: dynamic_db
+    base_model_name: auto
+    fine_tuned_model_name: auto
+
+  timeout_seconds: 60
+
+  health_check:
+    enabled: true
+    verify_models: true
+    verify_inference: true
+
+output:
+  runs_path: ../runs
+
+observability:
+  console_verbosity: concise

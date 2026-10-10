@@ -64,3 +64,4 @@ credentials.yml
 Thumbs.db
 /.idea/
 /.vscode/
+/ci_artifacts/

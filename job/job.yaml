@@ -1,0 +1,29 @@
+schema_version: 1
+
+job:
+  name: example-qwen-job
+
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  # revision: main
+
+datasets:
+  train:
+    path: train.json
+    source_format: auto
+    format: auto
+
+  benchmark:
+    path: benchmark.json
+    format: auto
+
+training:
+  epochs: 1
+  learning_rate: 0.00005
+  batch_size: 1
+  cutoff_len: 2048
+
+  lora:
+    rank: 8
+    alpha: 16
+    dropout: 0.0

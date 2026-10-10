@@ -1,0 +1,10 @@
+[
+  {
+    "instruction": "Answer briefly: What is fine-tuning?",
+    "output": "Fine-tuning adapts a pretrained model to a target task using additional training data."
+  },
+  {
+    "instruction": "Answer briefly: What is LoRA?",
+    "output": "LoRA is a parameter-efficient fine-tuning method using trainable low-rank adapters."
+  }
+]
