@@ -175,11 +175,26 @@ phase1-finetune:
       mkdir -p "$CI_PROJECT_DIR/ci_artifacts/project1"
       cp "$manifests" "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json"
     - |
+      benchmark_files=$(find "$CI_PROJECT_DIR/ci_artifacts/job" \
+        -maxdepth 1 -type f -name 'benchmark.*' -print)
+
+      benchmark_count=$(printf '%s\n' "$benchmark_files" \
+        | awk 'NF { count++ } END { print count + 0 }')
+
+      if [ "$benchmark_count" != "1" ]; then
+        echo "Expected exactly one benchmark dataset, found $benchmark_count." >&2
+        exit 1
+      fi
+
+      PROJECT1_BENCHMARK_FILE=$(basename "$benchmark_files")
+
       umask 077
       {
+        printf 'PROJECT1_UPSTREAM_PROJECT_ID=%s\n' "$CI_PROJECT_ID"
         printf 'PROJECT1_UPSTREAM_PIPELINE_ID=%s\n' "$CI_PIPELINE_ID"
         printf 'PROJECT1_UPSTREAM_JOB_ID=%s\n' "$CI_JOB_ID"
         printf 'PROJECT1_UPSTREAM_COMMIT_SHA=%s\n' "$CI_COMMIT_SHA"
+        printf 'PROJECT1_BENCHMARK_FILE=%s\n' "$PROJECT1_BENCHMARK_FILE"
       } > "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env"
 
   after_script:
@@ -189,6 +204,8 @@ phase1-finetune:
     paths:
       - ci_artifacts/project1/gateway_manifest.json
       - ci_artifacts/project1/upstream.env
+      - ci_artifacts/job/benchmark.*
+      - ci_artifacts/job/job_manifest.json
     expire_in: 30 days
     when: on_success
 
@@ -220,9 +237,11 @@ prepare-phase1-benchmark-trigger:
         printf '%s\n' '  stage: benchmark'
         printf '%s\n' '  variables:'
         printf '    PROJECT1_HANDOFF_B64: "%s"\n' "$handoff_b64"
+        printf '    PROJECT1_UPSTREAM_PROJECT_ID: "%s"\n' "$PROJECT1_UPSTREAM_PROJECT_ID"
         printf '    PROJECT1_UPSTREAM_PIPELINE_ID: "%s"\n' "$PROJECT1_UPSTREAM_PIPELINE_ID"
         printf '    PROJECT1_UPSTREAM_JOB_ID: "%s"\n' "$PROJECT1_UPSTREAM_JOB_ID"
         printf '    PROJECT1_UPSTREAM_COMMIT_SHA: "%s"\n' "$PROJECT1_UPSTREAM_COMMIT_SHA"
+        printf '    PROJECT1_BENCHMARK_FILE: "%s"\n' "$PROJECT1_BENCHMARK_FILE"
         printf '%s\n' '  trigger:'
         printf '%s\n' '    project: llm-projects/automatic-llm-benchmark-pipeline'
         printf '%s\n' '    branch: main'
