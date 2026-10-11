@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import math
 import subprocess
 from dataclasses import dataclass
 from typing import Callable, Sequence
@@ -48,6 +49,9 @@ def build_vllm_docker_command(request: ServingLaunchRequest) -> tuple[str, ...]:
     config = request.config
     if config.vllm is None:
         raise ServingError("Internal serving error: vLLM configuration is missing")
+    utilization = config.vllm.gpu_memory_utilization
+    if utilization is None or isinstance(utilization, bool) or not isinstance(utilization, (int, float)) or not math.isfinite(utilization) or not 0 < utilization <= 1:
+        raise ServingError("vLLM GPU memory utilization is unresolved or invalid")
     adapter = request.adapter_path.resolve()
     publish_host = (
         f"[{config.bind_host}]" if ":" in config.bind_host else config.bind_host

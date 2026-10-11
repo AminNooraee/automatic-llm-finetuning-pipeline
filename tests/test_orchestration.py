@@ -18,6 +18,7 @@ from fine_tuning_pipeline.orchestration.controller import (
     _safe_relative,
     _runtime_dns_from_environment,
     _selected_gpu_from_environment,
+    _admitted_utilization_from_environment,
     _validate_selected_gpu,
     _worker_config,
 )
@@ -340,6 +341,39 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(value["serving"]["configured_gpu_devices"], "2,3")
             self.assertEqual(value["serving"]["gpu_devices"], "1")
             self.assertEqual(value["serving"]["admission_override"], "1")
+
+    def test_admitted_utilization_overrides_static_value_before_serving(self):
+        with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:
+            root = Path(temporary)
+            layout = self._layout(root)
+            raw = config_value()
+            raw["serving"]["vllm"] = {"gpu_memory_utilization": 0.10}
+            (root / "project" / "config.yaml").write_text(json.dumps(raw), encoding="utf-8")
+            with patch.dict("os.environ", {"PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS": "2548"}):
+                PipelineController(
+                    docker=FakeDocker(root, "exec-12345678"),
+                    serving_manager_factory=FakeServingManager,
+                ).deploy(
+                    execution_id="exec-12345678", config_relative="config.yaml",
+                    layout=layout, training_image="trainer:test",
+                    training_image_id="sha256:trainer", source_revision="revision",
+                    source_identity="revision", selected_gpu="1",
+                )
+            serving = FakeServingManager.instances[0].calls[0]["config"]
+            self.assertEqual(serving.vllm.gpu_memory_utilization, 0.2548)
+
+    def test_admitted_utilization_environment_validation(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(_admitted_utilization_from_environment(automatic=False))
+            with self.assertRaisesRegex(ControllerError, "required"):
+                _admitted_utilization_from_environment(automatic=True)
+        for invalid in ("", "-1", "0", "10001", "1.5", " 1000", "1e3"):
+            with self.subTest(invalid=invalid), patch.dict(
+                "os.environ", {"PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS": invalid}
+            ), self.assertRaises(ControllerError):
+                _admitted_utilization_from_environment(automatic=True)
+        with patch.dict("os.environ", {"PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS": "2548"}):
+            self.assertEqual(_admitted_utilization_from_environment(automatic=True), 0.2548)
 
     def test_legacy_multi_gpu_config_is_preserved_without_override(self):
         with tempfile.TemporaryDirectory(dir=TESTS_DIR) as temporary:

@@ -28,12 +28,49 @@ class ResourcePolicy:
     model_parameters: int = 0
     activation_bytes_per_token: int = 0
     safety_margin_percent: int = 0
+    architecture: ModelArchitecture | None = None
+    serving_memory: ServingMemoryPolicy | None = None
+
+
+@dataclass(frozen=True)
+class ModelArchitecture:
+    model_type: str
+    hidden_size: int
+    num_hidden_layers: int
+    num_attention_heads: int
+    num_key_value_heads: int
+    head_dim: int
+    max_position_embeddings: int
+    sliding_window: int | None
+
+
+@dataclass(frozen=True)
+class ServingMemoryPolicy:
+    enabled: bool
+    runtime_overhead_mib: int
+    adapter_overhead_percent: int
+    safety_margin_percent: int
+    minimum_gpu_memory_utilization_bps: int
+    maximum_gpu_memory_utilization_bps: int
+
+
+@dataclass(frozen=True)
+class ServingMemoryEstimate:
+    weight_mib: int
+    adapter_mib: int
+    kv_cache_mib: int
+    runtime_overhead_mib: int
+    subtotal_mib: int
+    safety_margin_percent: int
+    required_serving_mib: int
+    kv_cache_bytes: int
+    label: str = "estimate"
 
 
 @dataclass(frozen=True)
 class ResourceEstimate:
     required_training_mib: int
-    serving_memory_utilization_bps: int
+    serving: ServingMemoryEstimate | None
     subtotal_training_mib: int
     safety_margin_percent: int
     label: str = "estimate"
@@ -44,6 +81,8 @@ _POLICY_FIELDS = {
     "model_parameter_estimate",
     "activation_bytes_per_token",
     "safety_margin_percent",
+    "model_architecture",
+    "serving_memory",
 }
 
 
@@ -82,6 +121,101 @@ def resolve_resource_policy(raw: Any) -> ResourcePolicy:
             minimum=10,
             maximum=100,
         ),
+        architecture=_resolve_architecture(raw.get("model_architecture")),
+        serving_memory=_resolve_serving_memory(raw.get("serving_memory")),
+    )
+
+
+def _resolve_architecture(raw: Any) -> ModelArchitecture | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ResourcePreflightError("resource_preflight.model_architecture must be a mapping")
+    fields = set(ModelArchitecture.__dataclass_fields__)
+    unknown = set(raw) - fields
+    if unknown:
+        raise ResourcePreflightError(f"Unknown model_architecture fields: {sorted(unknown)}")
+    missing = fields - set(raw)
+    if missing:
+        raise ResourcePreflightError(f"Missing model_architecture fields: {sorted(missing)}")
+    model_type = _required_text(raw["model_type"], "model_architecture.model_type")
+    values = {
+        field: _positive_integer(raw[field], f"model_architecture.{field}")
+        for field in fields - {"model_type", "sliding_window"}
+    }
+    sliding = raw["sliding_window"]
+    if sliding is not None:
+        sliding = _positive_integer(sliding, "model_architecture.sliding_window")
+    if values["num_key_value_heads"] > values["num_attention_heads"]:
+        raise ResourcePreflightError("model_architecture.num_key_value_heads exceeds num_attention_heads")
+    return ModelArchitecture(model_type=model_type, sliding_window=sliding, **values)
+
+
+def _resolve_serving_memory(raw: Any) -> ServingMemoryPolicy | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ResourcePreflightError("resource_preflight.serving_memory must be a mapping")
+    fields = {
+        "enabled", "runtime_overhead_mib", "adapter_overhead_percent",
+        "safety_margin_percent", "minimum_gpu_memory_utilization",
+        "maximum_gpu_memory_utilization",
+    }
+    if set(raw) != fields:
+        raise ResourcePreflightError("resource_preflight.serving_memory requires exactly its policy fields")
+    if raw["enabled"] is not True:
+        raise ResourcePreflightError("resource_preflight.serving_memory.enabled must be true")
+    runtime = _positive_integer(raw["runtime_overhead_mib"], "serving_memory.runtime_overhead_mib")
+    adapter = _bounded_integer(raw["adapter_overhead_percent"], "serving_memory.adapter_overhead_percent", 0, 100)
+    margin = _bounded_integer(raw["safety_margin_percent"], "serving_memory.safety_margin_percent", 0, 100)
+    def basis_points(key: str) -> int:
+        value = raw[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ResourcePreflightError(f"serving_memory.{key} must be a finite utilization")
+        bps = round(value * 10000)
+        if not 1 <= bps <= 10000 or bps / 10000 != float(value):
+            raise ResourcePreflightError(f"serving_memory.{key} must be an exact basis-point utilization")
+        return bps
+    minimum = basis_points("minimum_gpu_memory_utilization")
+    maximum = basis_points("maximum_gpu_memory_utilization")
+    if minimum > maximum:
+        raise ResourcePreflightError("serving_memory minimum utilization exceeds maximum")
+    return ServingMemoryPolicy(True, runtime, adapter, margin, minimum, maximum)
+
+
+def estimate_serving_memory(
+    policy: ResourcePolicy, training: TrainingConfig, serving: ServingConfig
+) -> ServingMemoryEstimate:
+    architecture = policy.architecture
+    memory_policy = policy.serving_memory
+    if architecture is None or memory_policy is None or serving.vllm is None:
+        raise ResourcePreflightError("Serving memory estimate requires architecture, policy, and vLLM")
+    if serving.vllm.max_model_len > architecture.max_position_embeddings:
+        raise ResourcePreflightError(
+            f"serving.vllm.max_model_len {serving.vllm.max_model_len} exceeds "
+            f"model context {architecture.max_position_embeddings}"
+        )
+    mib = 1024 * 1024
+    element_bytes = 4 if training.precision == "fp32" else 2
+    weight_bytes = policy.model_parameters * element_bytes
+    adapter_bytes = (weight_bytes * memory_policy.adapter_overhead_percent + 99) // 100
+    kv_bytes = (
+        2 * architecture.num_hidden_layers * architecture.num_key_value_heads
+        * architecture.head_dim * serving.vllm.max_model_len
+        * serving.vllm.max_num_seqs * element_bytes
+    )
+    runtime_bytes = memory_policy.runtime_overhead_mib * mib
+    subtotal = weight_bytes + adapter_bytes + kv_bytes + runtime_bytes
+    required = (subtotal * (100 + memory_policy.safety_margin_percent) + 99) // 100
+    ceil_mib = lambda value: (value + mib - 1) // mib
+    return ServingMemoryEstimate(
+        weight_mib=ceil_mib(weight_bytes), adapter_mib=ceil_mib(adapter_bytes),
+        kv_cache_mib=ceil_mib(kv_bytes),
+        kv_cache_bytes=kv_bytes,
+        runtime_overhead_mib=memory_policy.runtime_overhead_mib,
+        subtotal_mib=ceil_mib(subtotal),
+        safety_margin_percent=memory_policy.safety_margin_percent,
+        required_serving_mib=ceil_mib(required),
     )
 
 
@@ -119,10 +253,13 @@ def estimate_required_vram(
         subtotal_bytes * (100 + policy.safety_margin_percent) + 99
     ) // 100
     mib = 1024 * 1024
-    utilization_bps = math.ceil(serving.vllm.gpu_memory_utilization * 10_000)
+    serving_estimate = (
+        estimate_serving_memory(policy, training, serving)
+        if policy.serving_memory is not None else None
+    )
     return ResourceEstimate(
         required_training_mib=math.ceil(required_bytes / mib),
-        serving_memory_utilization_bps=utilization_bps,
+        serving=serving_estimate,
         subtotal_training_mib=math.ceil(subtotal_bytes / mib),
         safety_margin_percent=policy.safety_margin_percent,
     )
@@ -336,20 +473,30 @@ def main(argv: list[str] | None = None) -> int:
                 _write_env(args.output, {"PIPELINE_RESOURCE_PREFLIGHT_ENABLED": 0})
                 return 0
             assert estimate is not None
+            if estimate.serving is None or policy.serving_memory is None:
+                raise ResourcePreflightError("Serving architecture and memory policy are required")
             _write_env(
                 args.output,
                 {
                     "PIPELINE_RESOURCE_PREFLIGHT_ENABLED": 1,
                     "GPU_ESTIMATED_TRAINING_MIB": estimate.required_training_mib,
-                    "GPU_SERVING_MEMORY_UTILIZATION_BPS": (
-                        estimate.serving_memory_utilization_bps
-                    ),
+                    "GPU_ESTIMATED_SERVING_MIB": estimate.serving.required_serving_mib,
+                    "GPU_VLLM_MIN_UTILIZATION_BPS": policy.serving_memory.minimum_gpu_memory_utilization_bps,
+                    "GPU_VLLM_MAX_UTILIZATION_BPS": policy.serving_memory.maximum_gpu_memory_utilization_bps,
                 },
             )
             print(
                 "Estimated training VRAM: "
                 f"{estimate.required_training_mib} MiB "
                 f"({estimate.safety_margin_percent}% safety margin; estimate, not guarantee)"
+            )
+            print(
+                f"Estimated serving VRAM: {estimate.serving.required_serving_mib} MiB "
+                f"(planning estimate; weights {estimate.serving.weight_mib}, "
+                f"adapter allowance {estimate.serving.adapter_mib}, "
+                f"KV cache {estimate.serving.kv_cache_mib}, "
+                f"runtime overhead {estimate.serving.runtime_overhead_mib} MiB; "
+                f"safety margin {estimate.serving.safety_margin_percent}%)"
             )
         else:
             selected = select_configured_port(args.config)

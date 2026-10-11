@@ -45,12 +45,12 @@ class UserJobTests(unittest.TestCase):
         (self.job_dir / "train.json").write_text('[{"instruction":"Hi","output":"Hello"}]')
         (self.job_dir / "benchmark.json").write_text('[{"prompt":"Hi"}]')
 
-    def prepare(self):
+    def prepare(self, catalog_path=None):
         job_path = self.job_dir / "job.yaml"
         job_path.write_text(yaml.safe_dump(self.job))
         prepare_job(
             job_path,
-            ROOT / "configs/model_catalog.yaml",
+            catalog_path or ROOT / "configs/model_catalog.yaml",
             ROOT / "configs/ci_infrastructure.yaml",
             self.output,
         )
@@ -66,6 +66,12 @@ class UserJobTests(unittest.TestCase):
         self.assertEqual(config["training"]["precision"], "fp32")
         self.assertEqual(config["training"]["attention_backend"], "eager")
         self.assertEqual(config["resource_preflight"]["model_parameter_estimate"], 490000000)
+        catalog = yaml.safe_load((ROOT / "configs/model_catalog.yaml").read_text())
+        self.assertEqual(
+            config["resource_preflight"]["model_architecture"],
+            catalog["models"][MODEL]["architecture"],
+        )
+        self.assertEqual(config["serving"]["vllm"]["gpu_memory_utilization"], "auto")
         for field, filename in (
             ("train_dataset", "train.json"),
             ("benchmark_dataset", "benchmark.json"),
@@ -74,6 +80,37 @@ class UserJobTests(unittest.TestCase):
             digest = hashlib.sha256((self.output / filename).read_bytes()).hexdigest()
             self.assertEqual(manifest[field]["sha256"], digest)
         self.assertEqual(training_path(self.output), (self.output / "train.json").resolve())
+
+    def test_catalog_architecture_validation_and_user_boundary(self):
+        catalog = yaml.safe_load((ROOT / "configs/model_catalog.yaml").read_text())
+        entry = catalog["models"][MODEL]
+        original = dict(entry["architecture"])
+        for value, message in (
+            (None, "architecture"),
+            ({"hidden_size": 1}, "model_type"),
+            ({**original, "hidden_size": True}, "hidden_size"),
+            ({**original, "num_key_value_heads": 99}, "num_key_value_heads"),
+            ({**original, "unknown": 1}, "Unsupported catalog architecture"),
+            ({**original, "sliding_window": 0}, "sliding_window"),
+        ):
+            with self.subTest(value=value):
+                entry["architecture"] = value
+                path = self.root / "catalog.yaml"
+                path.write_text(yaml.safe_dump(catalog))
+                with self.assertRaisesRegex(JobConfigError, message):
+                    self.prepare(path)
+        for sliding in (None, 10):
+            entry["architecture"] = {**original, "sliding_window": sliding}
+            path = self.root / "catalog.yaml"
+            path.write_text(yaml.safe_dump(catalog))
+            self.prepare(path)
+            generated = yaml.safe_load((self.output / "finetune.yaml").read_text())
+            self.assertEqual(generated["resource_preflight"]["model_architecture"]["sliding_window"], sliding)
+        for field in ("architecture", "serving_memory"):
+            self.job["model"][field] = {}
+            with self.assertRaisesRegex(JobConfigError, "Unsupported model"):
+                self.prepare()
+            del self.job["model"][field]
 
     def test_supported_training_extensions(self):
         for suffix in sorted(TRAIN_EXTENSIONS):

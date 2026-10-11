@@ -311,11 +311,11 @@ if [ "$RESOURCE_PREFLIGHT" -eq 1 ]; then
         echo "PIPELINE_RESOURCE_PREFLIGHT=1 requires resource_preflight.enabled=true in the config." >&2
         exit 2
     fi
-    export GPU_ESTIMATED_TRAINING_MIB GPU_SERVING_MEMORY_UTILIZATION_BPS
+    export GPU_ESTIMATED_TRAINING_MIB GPU_ESTIMATED_SERVING_MIB GPU_VLLM_MIN_UTILIZATION_BPS GPU_VLLM_MAX_UTILIZATION_BPS
     selected_gpu_env=${GPU_PREFLIGHT_ENV_FILE:-$PREFLIGHT_DIR/gpu.env}
     GPU_PREFLIGHT_ENV_FILE=$selected_gpu_env sh "$PROJECT_DIR/scripts/gpu_preflight.sh"
     . "$selected_gpu_env"
-    export PIPELINE_SELECTED_GPU
+    export PIPELINE_SELECTED_GPU PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS
     SELECTED_GPU_IS_SET=1
 
     run_resource_preflight_helper select-port host port.env
@@ -353,6 +353,9 @@ set -- docker run --rm --read-only --network host \
 set -- "$@" --env "PIPELINE_WORKER_UID=$HOST_UID" --env "PIPELINE_WORKER_GID=$HOST_GID"
 if [ "$SELECTED_GPU_IS_SET" -eq 1 ]; then
     set -- "$@" --env "PIPELINE_SELECTED_GPU=$PIPELINE_SELECTED_GPU"
+    if [ "${PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS+x}" = x ]; then
+        set -- "$@" --env "PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS=$PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS"
+    fi
 fi
 if [ "$SELECTED_PORT_IS_SET" -eq 1 ]; then
     set -- "$@" --env "PIPELINE_SELECTED_PORT=$PIPELINE_SELECTED_PORT"

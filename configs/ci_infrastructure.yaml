@@ -10,6 +10,14 @@ resource_preflight:
   enabled: true
   activation_bytes_per_token: 1048576
   safety_margin_percent: 25
+  # Conservative planning allowances; actual vLLM allocation may vary.
+  serving_memory:
+    enabled: true
+    runtime_overhead_mib: 2048
+    adapter_overhead_percent: 2
+    safety_margin_percent: 15
+    minimum_gpu_memory_utilization: 0.10
+    maximum_gpu_memory_utilization: 0.90
 
 orchestration:
   enabled: true
@@ -35,7 +43,7 @@ serving:
   vllm:
     image: vllm/vllm-openai:v0.11.0
     gpu_devices: "0"
-    gpu_memory_utilization: 0.10
+    gpu_memory_utilization: auto
     max_model_len: 4096
     max_num_seqs: 2
 

@@ -390,6 +390,32 @@ def prepare_job(
         "attention_backend",
     ).lower()
 
+    architecture = require_mapping(policy.get("architecture"), "architecture")
+    architecture_fields = {
+        "model_type", "hidden_size", "num_hidden_layers", "num_attention_heads",
+        "num_key_value_heads", "head_dim", "max_position_embeddings", "sliding_window",
+    }
+    reject_unknown(architecture, architecture_fields, "catalog architecture")
+    validated_architecture = {
+        "model_type": require_text(architecture.get("model_type"), "architecture.model_type")
+    }
+    for field in (
+        "hidden_size", "num_hidden_layers", "num_attention_heads",
+        "num_key_value_heads", "head_dim", "max_position_embeddings",
+    ):
+        validated_architecture[field] = require_positive_int(
+            architecture.get(field), f"architecture.{field}"
+        )
+    if "sliding_window" not in architecture:
+        raise JobConfigError("architecture.sliding_window is required")
+    sliding_window = architecture["sliding_window"]
+    validated_architecture["sliding_window"] = (
+        None if sliding_window is None else require_positive_int(
+            sliding_window, "architecture.sliding_window"
+        )
+    )
+    if validated_architecture["num_key_value_heads"] > validated_architecture["num_attention_heads"]:
+        raise JobConfigError("architecture.num_key_value_heads must not exceed num_attention_heads")
     if precision not in {
         "fp32",
         "fp16",
@@ -444,6 +470,7 @@ def prepare_job(
     resource_preflight[
         "model_parameter_estimate"
     ] = parameter_count
+    resource_preflight["model_architecture"] = validated_architecture
 
     # ---------------------------------------------------------
     # Output package

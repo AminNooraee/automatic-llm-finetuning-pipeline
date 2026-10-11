@@ -103,6 +103,20 @@ def _validate_selected_gpu(value: str | None) -> str | None:
     return value.lstrip("0") or "0"
 
 
+def _admitted_utilization_from_environment(*, automatic: bool) -> float | None:
+    raw = os.environ.get("PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS")
+    if raw is None:
+        if automatic:
+            raise ControllerError("PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS is required for automatic serving")
+        return None
+    if not re.fullmatch(r"[0-9]+", raw):
+        raise ControllerError("PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS must be a decimal integer")
+    bps = int(raw)
+    if not 1 <= bps <= 10000:
+        raise ControllerError("PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS must be from 1 to 10000")
+    return bps / 10000.0
+
+
 def _selected_gpu_from_environment() -> str | None:
     if "PIPELINE_SELECTED_GPU" not in os.environ:
         return None
@@ -274,6 +288,9 @@ class PipelineController:
         )
         if not prevalidated_serving.enabled:
             raise ControllerError("The full deployment controller requires serving.enabled=true")
+        admitted_utilization = _admitted_utilization_from_environment(
+            automatic=prevalidated_serving.vllm.gpu_memory_utilization is None
+        )
         resolve_gateway_config(
             raw.get("gateway"), serving=prevalidated_serving, run_id=execution_id
         )
@@ -431,10 +448,17 @@ class PipelineController:
         configured_serving_gpu_devices = (
             serving.vllm.gpu_devices if serving.vllm is not None else None
         )
-        if selected_gpu is not None and serving.vllm is not None:
+        if serving.vllm is not None and (selected_gpu is not None or admitted_utilization is not None):
             serving = replace(
                 serving,
-                vllm=replace(serving.vllm, gpu_devices=selected_gpu),
+                vllm=replace(
+                    serving.vllm,
+                    gpu_devices=selected_gpu or serving.vllm.gpu_devices,
+                    gpu_memory_utilization=(
+                        admitted_utilization if admitted_utilization is not None
+                        else serving.vllm.gpu_memory_utilization
+                    ),
+                ),
             )
             print(
                 "GPU admission override: "

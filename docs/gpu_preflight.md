@@ -22,9 +22,23 @@ for training method, precision, batch size, cutoff length, gradient
 checkpointing, and an explicit activation-bytes-per-token planning assumption.
 It then applies the configured safety margin. Phase 1 uses a 25% margin.
 
-The result is deliberately reported as an estimate, not a guarantee. For each
-GPU, admission takes the larger of the training estimate and the vLLM reservation
-computed from that GPU's total memory and `serving.vllm.gpu_memory_utilization`.
+The catalog is an offline architecture metadata snapshot. Job preparation validates
+the selected entry and copies its exact architecture into generated `finetune.yaml`.
+Runtime admission uses that generated snapshot and makes no Hugging Face network
+request. Training and serving VRAM are separate conservative planning estimates,
+not guarantees. Serving uses parameter count and precision for weights, a 2%
+adapter allowance, and a KV cache allowance based on layers, KV heads, head
+dimension, model length, and maximum concurrent sequences. It intentionally does
+not reduce the KV estimate for sliding window attention. A 2048 MiB runtime
+allowance and 15% serving safety margin complete the policy.
+
+Each GPU must have at least max(training estimate, serving estimate) free MiB.
+After selecting the physical GPU, the launcher calculates
+`ceil(serving_estimate_mib * 10000 / selected_gpu_total_mib)` basis points.
+The 1000 basis point minimum is a floor; the 9000 basis point maximum is a hard
+admission boundary. The controller converts the admitted basis points to a
+fraction and passes it to vLLM. Oversized single GPU jobs fail before training.
+Tensor parallel serving is outside the current qualified path.
 
 `GPU_DEVICE` is optional and defaults to `auto`. In unified mode, `auto` filters
 out GPUs that cannot meet their estimated requirement, then selects the eligible
@@ -50,7 +64,10 @@ sh scripts/gpu_preflight.sh
 
 The file is atomically replaced with mode `600` and contains the selected numeric
 index as `PIPELINE_SELECTED_GPU` and `CUDA_VISIBLE_DEVICES`. Unified mode also
-records `PIPELINE_ESTIMATED_REQUIRED_VRAM_MIB`. Its parent directory must already
+records `PIPELINE_SELECTED_GPU_TOTAL_MIB`,
+`PIPELINE_ESTIMATED_TRAINING_MIB`, `PIPELINE_ESTIMATED_SERVING_MIB`,
+`PIPELINE_ESTIMATED_REQUIRED_VRAM_MIB`, and
+`PIPELINE_VLLM_GPU_MEMORY_UTILIZATION_BPS`. Its parent directory must already
 exist. Place it in a job-private directory, and treat the selection as local to
 the worker on which the check ran.
 

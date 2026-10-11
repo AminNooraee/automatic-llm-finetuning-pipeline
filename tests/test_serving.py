@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from fine_tuning_pipeline.http_client import JsonResponse
@@ -12,6 +13,7 @@ from fine_tuning_pipeline.serving.backends.vllm_docker import (
 from fine_tuning_pipeline.serving.config import ServingConfigError, resolve_serving_config
 from fine_tuning_pipeline.serving.contracts import (
     ServingConflictError,
+    ServingError,
     ServingLaunchRequest,
     ServingLaunchResult,
     ServingVerificationError,
@@ -207,6 +209,21 @@ class DockerBackendTests(unittest.TestCase):
         return ServingLaunchRequest(
             "run-1", "Org/Base-Model", revision, Path("adapter"), 64, config
         )
+
+    def test_auto_utilization_requires_resolved_value_for_docker(self):
+        config = serving_config(vllm={
+            "image": "vllm/vllm-openai:v0.11.0", "gpu_devices": "0",
+            "gpu_memory_utilization": "auto", "max_model_len": 4096,
+            "max_num_seqs": 2,
+        })
+        request = ServingLaunchRequest(
+            "run-1", "Org/Base-Model", "abc123", Path("adapter"), 8, config
+        )
+        with self.assertRaisesRegex(ServingError, "unresolved"):
+            build_vllm_docker_command(request)
+        resolved = replace(config, vllm=replace(config.vllm, gpu_memory_utilization=0.2548))
+        command = build_vllm_docker_command(replace(request, config=resolved))
+        self.assertEqual(command[command.index("--gpu-memory-utilization") + 1], "0.2548")
 
     def test_command_loads_base_once_and_static_lora_in_one_process(self):
         command = build_vllm_docker_command(self.request())

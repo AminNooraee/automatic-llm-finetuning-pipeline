@@ -20,7 +20,7 @@ class ServingConfigError(ValueError):
 class VllmConfig:
     image: str
     gpu_devices: str
-    gpu_memory_utilization: float
+    gpu_memory_utilization: float | None
     max_model_len: int
     max_num_seqs: int
 
@@ -159,11 +159,11 @@ def resolve_serving_config(
         )
     if len(set(gpu_devices.split(","))) != len(gpu_devices.split(",")):
         raise ServingConfigError("serving.vllm.gpu_devices must not contain duplicates")
-    memory = _number(
-        raw_vllm.get("gpu_memory_utilization", 0.15),
-        "serving.vllm.gpu_memory_utilization",
+    memory_value = raw_vllm.get("gpu_memory_utilization", 0.15)
+    memory = None if memory_value == "auto" else _number(
+        memory_value, "serving.vllm.gpu_memory_utilization"
     )
-    if not 0 < memory <= 1:
+    if memory is not None and not 0 < memory <= 1:
         raise ServingConfigError("serving.vllm.gpu_memory_utilization must be greater than 0 and at most 1")
     vllm = VllmConfig(
         image=image,

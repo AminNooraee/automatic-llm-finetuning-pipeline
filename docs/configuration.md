@@ -188,7 +188,7 @@ serving:
   vllm:
     image: vllm/vllm-openai:v0.11.0
     gpu_devices: "0"
-    gpu_memory_utilization: 0.15
+    gpu_memory_utilization: auto  # resolved after GPU admission
     max_model_len: 4096
     max_num_seqs: 2
   health_check:
@@ -206,6 +206,22 @@ resource_preflight:
   model_parameter_estimate: 490000000
   activation_bytes_per_token: 1048576
   safety_margin_percent: 25
+  model_architecture:  # copied from the trusted offline model catalog
+    model_type: qwen2
+    hidden_size: 896
+    num_hidden_layers: 24
+    num_attention_heads: 14
+    num_key_value_heads: 2
+    head_dim: 64
+    max_position_embeddings: 32768
+    sliding_window: 32768
+  serving_memory:
+    enabled: true
+    runtime_overhead_mib: 2048
+    adapter_overhead_percent: 2
+    safety_margin_percent: 15
+    minimum_gpu_memory_utilization: 0.10
+    maximum_gpu_memory_utilization: 0.90
 
 serving:
   port: auto
@@ -214,8 +230,13 @@ serving:
     end: 8199
 ```
 
-The parameter count and activation allowance are explicit planning inputs, not
-values inferred from the model name. The estimate is conservative but is not a
+The parameter count, architecture snapshot, and activation allowance are trusted
+planning inputs copied into generated job configuration; CI users do not set them.
+Serving KV memory uses layers, KV heads, head dimension, model length, and sequence
+count. Sliding-window reduction is intentionally ignored. Selected-GPU utilization
+is derived from the serving estimate after physical GPU selection. The minimum is
+a floor and the maximum is a hard safety boundary. Runtime preflight is offline
+and the qualified serving architecture uses one GPU. The estimate is conservative but is not a
 guarantee. `safety_margin_percent` must be between 10 and 100. Automatic ports
 require `PIPELINE_SELECTED_PORT`, which the opted-in launcher preflight produces;
 users do not choose the port manually.
