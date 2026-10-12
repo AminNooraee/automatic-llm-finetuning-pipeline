@@ -7,14 +7,15 @@ stages:
   - benchmark
 
 variables:
-  GPU_RUNNER_TAG: "finetune-gpu"
-  PHASE1_GPU_RUNNER_TAG: "worker-server53"
+  GPU_RUNNER_TAG: "worker-4090-01"
+  PHASE1_GPU_RUNNER_TAG: "worker-4090-01"
+  PREPARE_RUNNER_TAG: "worker-server52"
 
 prepare-user-job:
   stage: job-prepare
 
   tags:
-    - $PHASE1_GPU_RUNNER_TAG
+    - $PREPARE_RUNNER_TAG
 
   script:
     - |
@@ -215,7 +216,7 @@ prepare-phase1-benchmark-trigger:
   stage: benchmark-prepare
 
   tags:
-    - $PHASE1_GPU_RUNNER_TAG
+    - $PREPARE_RUNNER_TAG
 
   needs:
     - job: phase1-finetune
