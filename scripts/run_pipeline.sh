@@ -161,7 +161,12 @@ run_docker_build_attempt() {
     docker build --network=host \
         --build-context "pipeline_dns=$build_dns_context" \
         --file "$build_dockerfile" "$@" >"$BUILD_LOG" 2>&1 || build_status=$?
-    cat "$BUILD_LOG"
+    if [ "$build_status" -ne 0 ]; then
+        echo "Docker image build failed; showing build log:"
+        cat "$BUILD_LOG"
+    else
+        echo "Docker image build complete."
+    fi
     rm -f -- "$BUILD_LOG"
     BUILD_LOG=
     return "$build_status"

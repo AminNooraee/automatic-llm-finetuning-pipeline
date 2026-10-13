@@ -49,6 +49,36 @@ class DockerRunner:
             raise ControllerError(f"Docker operation could not be executed: {type(error).__name__}") from None
         return DockerResult(result.returncode, result.stdout, result.stderr)
 
+    def stream(
+        self,
+        command: Sequence[str],
+        *,
+        secrets: Sequence[str] = (),
+    ) -> int:
+        """Stream one Docker command live to the operator console."""
+        try:
+            process = subprocess.Popen(
+                list(command),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ControllerError(
+                f"Docker streaming operation could not be executed: {type(error).__name__}"
+            ) from None
+
+        if process.stdout is not None:
+            for line in process.stdout:
+                print(
+                    redact_text(line, list(secrets)),
+                    end="",
+                    flush=True,
+                )
+
+        return process.wait()
+
 
 def _safe_docker_error_reason(
     result: DockerResult, *, secrets: Sequence[str] = (), limit: int = 320
@@ -367,6 +397,10 @@ class PipelineController:
             "execution_id": execution_id,
             "training_container": {"name": training_name, "id": None, "status": "planned"},
         })
+        print(
+            f"[1/5] Preparing training container on GPU {effective_training_gpu_devices}...",
+            flush=True,
+        )
         created = self.docker.run(command)
         if created.returncode != 0 or not created.stdout.strip():
             self._remove_planned_training_if_owned(training_name, execution_id)
@@ -390,11 +424,39 @@ class PipelineController:
         try:
             started = self.docker.run(("docker", "container", "start", training_id))
             if started.returncode != 0:
-                raise ControllerError("Training container could not be started")
-            waited = self.docker.run(("docker", "container", "wait", training_id))
-            logs = self.docker.run(("docker", "container", "logs", training_id))
-            if logs.stdout:
-                print(logs.stdout, end="")
+                reason = _safe_docker_error_reason(
+                    started,
+                    secrets=(gateway_key,) if gateway_key else (),
+                )
+                raise ControllerError(
+                    f"Training container could not be started: {reason}"
+                )
+
+            print(
+                f"[2/5] Training started on GPU {effective_training_gpu_devices}",
+                flush=True,
+            )
+
+            stream_logs = getattr(self.docker, "stream", None)
+            if callable(stream_logs):
+                stream_logs(
+                    ("docker", "container", "logs", "--follow", training_id),
+                    secrets=(gateway_key,) if gateway_key else (),
+                )
+                waited = self.docker.run(
+                    ("docker", "container", "wait", training_id)
+                )
+            else:
+                # Test/fallback runner path.
+                waited = self.docker.run(
+                    ("docker", "container", "wait", training_id)
+                )
+                logs = self.docker.run(
+                    ("docker", "container", "logs", training_id)
+                )
+                if logs.stdout:
+                    print(logs.stdout, end="", flush=True)
+
             try:
                 exit_code = int(waited.stdout.strip()) if waited.returncode == 0 else -1
             except ValueError:
@@ -403,6 +465,9 @@ class PipelineController:
             self._remove_training_if_owned(training_name, training_id, execution_id)
         if exit_code != 0:
             raise ControllerError("Training failed; serving and gateway stages were not started")
+
+        print("[3/5] Training complete; verifying artifacts...", flush=True)
+
         if not result_path.is_file():
             raise ControllerError("Training succeeded without the required result descriptor")
         result = json.loads(result_path.read_text(encoding="utf-8"))
@@ -475,6 +540,10 @@ class PipelineController:
             runtime=serving.runtime,
         )
         try:
+            print(
+                f"[4/5] Starting vLLM serving on {serving.base_url}...",
+                flush=True,
+            )
             serving_result = serving_manager.start_and_verify(
                 run_id=result["run_id"], run_root=run_root, config=serving,
                 base_model=raw["model"]["name"],
@@ -493,6 +562,10 @@ class PipelineController:
             )
             gateway_result = None
             if gateway.enabled:
+                print(
+                    f"[5/5] Registering Base/Fine models in LiteLLM at {gateway.base_url}...",
+                    flush=True,
+                )
                 current_phase = "gateway"
                 _record_phase(metadata_path, "gateway", "starting", provider=gateway.provider)
                 gateway_result = self.gateway_manager_factory(gateway).register_and_verify(

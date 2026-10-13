@@ -52,7 +52,8 @@ prepare-user-job:
       done
       chmod 644 "$DNS_CONTEXT_DIR/resolv.conf"
 
-      docker build \
+      echo "[Prepare] Building job-preparer image..."
+      docker build --quiet \
         --network=host \
         --build-context "pipeline_dns=$DNS_CONTEXT_DIR" \
         -f docker/Dockerfile.controller.host-dns \
