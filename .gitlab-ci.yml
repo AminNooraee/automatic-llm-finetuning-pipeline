@@ -5,10 +5,11 @@ stages:
   - finetune
   - benchmark-prepare
   - benchmark
+  - cleanup
 
 variables:
-  GPU_RUNNER_TAG: "worker-4090-01"
-  PHASE1_GPU_RUNNER_TAG: "worker-4090-01"
+  GPU_RUNNER_TAG: "worker-server53"
+  PHASE1_GPU_RUNNER_TAG: "worker-server53"
   PREPARE_RUNNER_TAG: "worker-server52"
 
 prepare-user-job:
@@ -176,7 +177,28 @@ phase1-finetune:
         *) echo "Expected exactly one new gateway_manifest.json, found $manifest_count." >&2; exit 1 ;;
       esac
       mkdir -p "$CI_PROJECT_DIR/ci_artifacts/project1"
-      cp "$manifests" "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json"
+
+      manifest_path=$manifests
+      run_root=$(dirname "$(dirname "$manifest_path")")
+      project1_run_id=$(basename "$run_root")
+
+      test -s "$run_root/gateway/registration.json" || {
+        echo "Missing gateway registration artifact." >&2
+        exit 1
+      }
+
+      test -s "$run_root/serving/operation.json" || {
+        echo "Missing serving ownership artifact." >&2
+        exit 1
+      }
+
+      cp "$manifest_path"         "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json"
+
+      cp "$run_root/gateway/registration.json"         "$CI_PROJECT_DIR/ci_artifacts/project1/registration.json"
+
+      cp "$run_root/serving/operation.json"         "$CI_PROJECT_DIR/ci_artifacts/project1/serving_operation.json"
+
+      printf '%s\n' "$project1_run_id"         > "$CI_PROJECT_DIR/ci_artifacts/project1/run_id"
     - |
       benchmark_files=$(find "$CI_PROJECT_DIR/ci_artifacts/job" \
         -maxdepth 1 -type f -name 'benchmark.*' -print)
@@ -191,12 +213,20 @@ phase1-finetune:
 
       PROJECT1_BENCHMARK_FILE=$(basename "$benchmark_files")
 
+      PROJECT1_RUN_ID=$(cat         "$CI_PROJECT_DIR/ci_artifacts/project1/run_id")
+
+      test -n "$PROJECT1_RUN_ID" || {
+        echo "Missing Project 1 run ID." >&2
+        exit 1
+      }
+
       umask 077
       {
         printf 'PROJECT1_UPSTREAM_PROJECT_ID=%s\n' "$CI_PROJECT_ID"
         printf 'PROJECT1_UPSTREAM_PIPELINE_ID=%s\n' "$CI_PIPELINE_ID"
         printf 'PROJECT1_UPSTREAM_JOB_ID=%s\n' "$CI_JOB_ID"
         printf 'PROJECT1_UPSTREAM_COMMIT_SHA=%s\n' "$CI_COMMIT_SHA"
+        printf 'PROJECT1_RUN_ID=%s\n' "$PROJECT1_RUN_ID"
         printf 'PROJECT1_BENCHMARK_FILE=%s\n' "$PROJECT1_BENCHMARK_FILE"
       } > "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env"
 
@@ -206,6 +236,9 @@ phase1-finetune:
   artifacts:
     paths:
       - ci_artifacts/project1/gateway_manifest.json
+      - ci_artifacts/project1/registration.json
+      - ci_artifacts/project1/serving_operation.json
+      - ci_artifacts/project1/run_id
       - ci_artifacts/project1/upstream.env
       - ci_artifacts/job/benchmark.*
       - ci_artifacts/job/job_manifest.json
@@ -266,3 +299,46 @@ trigger-phase1-benchmark:
       - artifact: ci_artifacts/project1/benchmark-trigger.yml
         job: prepare-phase1-benchmark-trigger
     strategy: depend
+
+
+cleanup-phase1-serving:
+  stage: cleanup
+
+  tags:
+    - $PHASE1_GPU_RUNNER_TAG
+
+  when: manual
+  allow_failure: true
+
+  dependencies:
+    - phase1-finetune
+
+  script:
+    - |
+      set -eu
+
+      test -s "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env" || {
+        echo "Missing upstream metadata." >&2
+        exit 1
+      }
+
+      test -s "$CI_PROJECT_DIR/ci_artifacts/project1/registration.json" || {
+        echo "Missing LiteLLM registration artifact." >&2
+        exit 1
+      }
+
+      test -s "$CI_PROJECT_DIR/ci_artifacts/project1/serving_operation.json" || {
+        echo "Missing serving ownership artifact." >&2
+        exit 1
+      }
+
+      . "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env"
+
+      : "${PROJECT1_RUN_ID:?PROJECT1_RUN_ID is required}"
+      : "${LITELLM_BASE_URL:?LITELLM_BASE_URL is required}"
+      : "${LITELLM_API_KEY:?LITELLM_API_KEY is required}"
+
+      python3 scripts/cleanup_phase1_run.py \
+        --run-id "$PROJECT1_RUN_ID" \
+        --registration "$CI_PROJECT_DIR/ci_artifacts/project1/registration.json" \
+        --serving-operation "$CI_PROJECT_DIR/ci_artifacts/project1/serving_operation.json"
