@@ -7,16 +7,11 @@ stages:
   - benchmark
   - cleanup
 
-variables:
-  GPU_RUNNER_TAG: "worker-server53"
-  PHASE1_GPU_RUNNER_TAG: "worker-server53"
-  PREPARE_RUNNER_TAG: "worker-server52"
-
 prepare-user-job:
   stage: job-prepare
 
   tags:
-    - $PREPARE_RUNNER_TAG
+    - worker-server52
 
   script:
     - |
@@ -86,11 +81,11 @@ gpu-runner-smoke-test:
   stage: smoke
 
   tags:
-    - $GPU_RUNNER_TAG
+    - worker-server53
 
   script:
     - echo "=== SELECTED RUNNER TAG ==="
-    - echo "$GPU_RUNNER_TAG"
+    - echo "worker-server53"
 
     - 'test -n "${SERVING_ADVERTISE_HOST:-}" || { echo "SERVING_ADVERTISE_HOST must be supplied by the runner environment." >&2; exit 1; }'
     - echo "=== SERVING ADVERTISE HOST ==="
@@ -115,7 +110,7 @@ gpu-admission-validation:
   stage: admission-validation
 
   tags:
-    - $GPU_RUNNER_TAG
+    - worker-server53
 
   variables:
     GPU_DEVICE: "auto"
@@ -131,7 +126,7 @@ phase1-finetune:
   resource_group: phase1-finetune
 
   tags:
-    - $PHASE1_GPU_RUNNER_TAG
+    - worker-server53
 
 
 
@@ -249,7 +244,7 @@ prepare-phase1-benchmark-trigger:
   stage: benchmark-prepare
 
   tags:
-    - $PREPARE_RUNNER_TAG
+    - worker-server52
 
   needs:
     - job: phase1-finetune
@@ -305,7 +300,7 @@ cleanup-phase1-serving:
   stage: cleanup
 
   tags:
-    - $PHASE1_GPU_RUNNER_TAG
+    - worker-server53
 
   when: manual
   allow_failure: true
