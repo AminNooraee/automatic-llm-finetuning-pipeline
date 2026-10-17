@@ -224,6 +224,7 @@ class UserJobTests(unittest.TestCase):
         self.assertNotIn('PIPELINE_DATASETS_DIR/train.json', str(phase["script"]))
         for artifact in (
             "ci_artifacts/project1/gateway_manifest.json",
+            "ci_artifacts/project1/report_context.json",
             "ci_artifacts/project1/upstream.env",
             "ci_artifacts/job/benchmark.*",
             "ci_artifacts/job/job_manifest.json",
@@ -238,6 +239,9 @@ class UserJobTests(unittest.TestCase):
         self.assertNotIn("strategy: mirror", ci_text)
         self.assertNotIn("needs:project", ci_text)
         self.assertEqual(ci["trigger-phase1-benchmark"]["trigger"]["strategy"], "depend")
+        self.assertIn('if [ -s "$CI_PROJECT_DIR/ci_artifacts/project1/report_context.json" ]', ci_text)
+        self.assertIn('PROJECT1_REPORT_CONTEXT_B64: "%s"', ci_text)
+        self.assertNotIn('echo "$PROJECT1_REPORT_CONTEXT_B64"', ci_text)
         self.assertIn("--network=host", str(prepare["script"]))
         self.assertIn("Dockerfile.controller.host-dns", str(prepare["script"]))
 

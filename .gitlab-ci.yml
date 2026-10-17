@@ -196,6 +196,14 @@ phase1-finetune:
 
       printf '%s\n' "$project1_run_id"         > "$CI_PROJECT_DIR/ci_artifacts/project1/run_id"
     - |
+      report_context=$(find "$PIPELINE_RUNS_DIR" -type f -name report_context.json -newer "$PHASE1_MANIFEST_MARKER" -print | head -n 1)
+      if [ -n "$report_context" ] && [ -s "$report_context" ]; then
+        cp "$report_context" "$CI_PROJECT_DIR/ci_artifacts/project1/report_context.json"
+        echo "Staged sanitized report context for downstream benchmark."
+      else
+        echo "No report context produced; downstream benchmark will render it as missing."
+      fi
+    - |
       benchmark_files=$(find "$CI_PROJECT_DIR/ci_artifacts/job" \
         -maxdepth 1 -type f -name 'benchmark.*' -print)
 
@@ -235,6 +243,7 @@ phase1-finetune:
       - ci_artifacts/project1/registration.json
       - ci_artifacts/project1/serving_operation.json
       - ci_artifacts/project1/run_id
+      - ci_artifacts/project1/report_context.json
       - ci_artifacts/project1/upstream.env
       - ci_artifacts/job/benchmark.*
       - ci_artifacts/job/job_manifest.json
@@ -259,6 +268,12 @@ prepare-phase1-benchmark-trigger:
       handoff_b64=$(base64 "$CI_PROJECT_DIR/ci_artifacts/project1/gateway_manifest.json" | tr -d '\r\n')
       test -n "$handoff_b64" || { echo "Failed to encode Project 1 handoff manifest." >&2; exit 1; }
 
+      report_context_b64=""
+      if [ -s "$CI_PROJECT_DIR/ci_artifacts/project1/report_context.json" ]; then
+        report_context_b64=$(base64 "$CI_PROJECT_DIR/ci_artifacts/project1/report_context.json" | tr -d '\r\n')
+        test -n "$report_context_b64" || { echo "Failed to encode Project 1 report context." >&2; exit 1; }
+      fi
+
       mkdir -p "$CI_PROJECT_DIR/ci_artifacts/project1"
       umask 077
       {
@@ -269,6 +284,7 @@ prepare-phase1-benchmark-trigger:
         printf '%s\n' '  stage: benchmark'
         printf '%s\n' '  variables:'
         printf '    PROJECT1_HANDOFF_B64: "%s"\n' "$handoff_b64"
+        printf '    PROJECT1_REPORT_CONTEXT_B64: "%s"\n' "$report_context_b64"
         printf '    PROJECT1_UPSTREAM_PROJECT_ID: "%s"\n' "$PROJECT1_UPSTREAM_PROJECT_ID"
         printf '    PROJECT1_UPSTREAM_PIPELINE_ID: "%s"\n' "$PROJECT1_UPSTREAM_PIPELINE_ID"
         printf '    PROJECT1_UPSTREAM_JOB_ID: "%s"\n' "$PROJECT1_UPSTREAM_JOB_ID"
@@ -279,7 +295,7 @@ prepare-phase1-benchmark-trigger:
         printf '%s\n' '    branch:  main'
         printf '%s\n' '    strategy: depend'
       } > "$CI_PROJECT_DIR/ci_artifacts/project1/benchmark-trigger.yml"
-      unset handoff_b64
+      unset handoff_b64 report_context_b64
 
   artifacts:
     paths:

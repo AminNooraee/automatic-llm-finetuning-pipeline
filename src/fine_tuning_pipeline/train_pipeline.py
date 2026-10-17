@@ -21,6 +21,7 @@ from .observability import (
     extract_training_metrics,
     sha256_file,
 )
+from .report_context import build_report_context, write_report_context
 from .run_manager import RunManager
 from .trainer import run_training
 from .training_config import TrainingConfig, resolve_training_config
@@ -376,6 +377,33 @@ def _print_run_summary(
     print(f"Status:\n{status.upper()}")
 
 
+def _write_training_report_context(run, prepared) -> None:
+    """Write the sanitized report context for downstream benchmark reporting.
+
+    Only user-editable training values and the measured training duration are
+    recorded. Failures here never abort the run: the artifact is optional and
+    downstream consumers tolerate its absence.
+    """
+    try:
+        resources = run.metadata.get("resources", {})
+        duration = (
+            resources.get("training_wall_clock_seconds")
+            if isinstance(resources, dict)
+            else None
+        )
+        context = build_report_context(
+            model_name=prepared.config["model"]["name"],
+            training_config=prepared.training_config,
+            training_duration_seconds=duration,
+        )
+        destination = write_report_context(run.paths.root, context)
+        with run.logging() as logger:
+            logger.info("Sanitized report context written: %s", destination.name)
+    except Exception as error:
+        with run.logging() as logger:
+            logger.warning("Optional report context write failed: %s", error)
+
+
 def execute_training(
     config_path=None,
     runs_root=None,
@@ -435,6 +463,8 @@ def execute_training(
                 "Training completed successfully with verified artifacts: %s",
                 ", ".join(path.name for path in artifacts),
             )
+
+            _write_training_report_context(run, prepared)
 
         if enable_optional_phases and prepared.serving_config.enabled:
             adapter_metadata = read_lora_adapter_metadata(
