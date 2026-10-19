@@ -88,7 +88,7 @@ class DockerSupportTests(unittest.TestCase):
         self.assertNotIn("!docker/configure-build-dns.sh", self.ignore_rules)
 
     def test_user_job_modules_are_in_build_context_allowlist(self):
-        required = ("prepare_ci_job.py", "validate_prepared_train.py")
+        required = ("prepare_ci_job.py", "validate_prepared_train.py", "full_cleanup.py")
         deny_index = self.ignore_rules.index("scripts/**")
         for name in required:
             rule = f"!scripts/{name}"
@@ -118,17 +118,19 @@ class DockerSupportTests(unittest.TestCase):
                 shutil.copy2(REPOSITORY_ROOT / "scripts" / name, context / "scripts" / name)
             for name in required_configs:
                 shutil.copy2(REPOSITORY_ROOT / "configs" / name, context / "configs" / name)
-            for name in ("__init__.py", "test_user_job.py"):
+            for name in ("__init__.py", "test_user_job.py", "test_full_cleanup.py"):
                 shutil.copy2(REPOSITORY_ROOT / "tests" / name, context / "tests" / name)
             shutil.copy2(REPOSITORY_ROOT / ".gitlab-ci.yml", context / ".gitlab-ci.yml")
             code = (
                 "import pathlib, sys, unittest; sys.path.insert(0, '.'); "
                 "import tests.test_user_job as test; "
+                "import tests.test_full_cleanup as test_cleanup; "
                 "import scripts.prepare_ci_job as prepare; "
                 "import scripts.validate_prepared_train as validate; "
+                "import scripts.full_cleanup as cleanup; "
                 "root = pathlib.Path.cwd().resolve(); "
                 "assert all(pathlib.Path(module.__file__).resolve().is_relative_to(root) "
-                "for module in (test, prepare, validate)); "
+                "for module in (test, test_cleanup, prepare, validate, cleanup)); "
                 "suite = unittest.defaultTestLoader.loadTestsFromModule(test); "
                 "result = unittest.TextTestRunner(verbosity=0).run(suite); "
                 "sys.exit(not result.wasSuccessful())"
