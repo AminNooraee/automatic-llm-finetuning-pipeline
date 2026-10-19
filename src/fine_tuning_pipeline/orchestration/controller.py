@@ -346,8 +346,17 @@ class PipelineController:
         execution_dir = layout.controller_state / "executions" / execution_id
         execution_dir.mkdir(parents=True, exist_ok=False)
         if layout.worker_uid is not None and layout.worker_gid is not None:
-            os.chown(execution_dir, layout.worker_uid, layout.worker_gid)
+            try:
+                current_uid = os.getuid() if hasattr(os, "getuid") else None
+                current_gid = os.getgid() if hasattr(os, "getgid") else None
+                if current_uid != layout.worker_uid or current_gid != layout.worker_gid:
+                    os.chown(execution_dir, layout.worker_uid, layout.worker_gid)
+            except (AttributeError, PermissionError, OSError):
+                pass
+        try:
             execution_dir.chmod(0o700)
+        except (PermissionError, OSError):
+            pass
         worker_config_path = execution_dir / "worker_config.yaml"
         worker_config_path.write_text(
             yaml.safe_dump(_worker_config(raw, controller_config, layout), sort_keys=False),

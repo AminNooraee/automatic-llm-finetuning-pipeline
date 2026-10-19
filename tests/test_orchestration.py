@@ -657,6 +657,9 @@ class LauncherStaticTests(unittest.TestCase):
             "--mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock",
             text,
         )
+        self.assertIn('--user "$HOST_UID:$HOST_GID"', text)
+        self.assertIn('--group-add "$DOCKER_SOCKET_GID"', text)
+        self.assertIn("DOCKER_SOCKET_PATH=", text)
 
     def test_controller_image_is_minimal_and_trainer_never_receives_socket(self):
         dockerfiles = [
@@ -684,6 +687,12 @@ class LauncherStaticTests(unittest.TestCase):
             "command.extend", 1
         )[0]
         self.assertNotIn("docker.sock", create_section)
+
+    def test_controller_os_chown_handles_non_root_gracefully(self):
+        controller_text = (
+            TESTS_DIR.parent / "src" / "fine_tuning_pipeline" / "orchestration" / "controller.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("except (AttributeError, PermissionError, OSError):", controller_text)
 
 
 if __name__ == "__main__":

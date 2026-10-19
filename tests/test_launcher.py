@@ -104,6 +104,8 @@ class DockerBuildNetworkLauncherTests(unittest.TestCase):
             "[project]\nname='launcher-test'\n", encoding="utf-8"
         )
         (self.root / "requirements.txt").write_text("", encoding="utf-8")
+        self.fake_socket = self.root / "fake-docker.sock"
+        self.fake_socket.touch()
         self.log = self.root / "docker.log"
         self.context_log = self.root / "dns-contexts.log"
         self.evidence = self.root / "dns-evidence.log"
@@ -175,6 +177,8 @@ exit 1
         runtime_dns="192.0.2.55 2001:db8::55",
         selected_gpu=None, cuda_visible_devices=None,
         serving_advertise_host=None,
+        docker_socket_path=None,
+        docker_socket_gid=None,
     ):
         for path in (self.log, self.context_log, self.evidence):
             path.unlink(missing_ok=True)
@@ -182,6 +186,8 @@ exit 1
         environment.pop("PIPELINE_SELECTED_GPU", None)
         environment.pop("CUDA_VISIBLE_DEVICES", None)
         environment.pop("SERVING_ADVERTISE_HOST", None)
+        environment.pop("PIPELINE_DOCKER_SOCKET_PATH", None)
+        environment.pop("PIPELINE_DOCKER_SOCKET_GID", None)
         environment.update({
             "PATH": f"{self.root / 'fake-bin'}{os.pathsep}{environment['PATH']}",
             "FAKE_DOCKER_LOG": self.log.as_posix(),
@@ -196,6 +202,13 @@ exit 1
             "PIPELINE_STATE_DIR": (self.root / "runtime/state").as_posix(),
             "TMPDIR": self.external_tmp.as_posix(),
         })
+        if docker_socket_path is not None:
+            if docker_socket_path:
+                environment["PIPELINE_DOCKER_SOCKET_PATH"] = docker_socket_path
+        else:
+            environment["PIPELINE_DOCKER_SOCKET_PATH"] = self.fake_socket.as_posix()
+        if docker_socket_gid is not None:
+            environment["PIPELINE_DOCKER_SOCKET_GID"] = str(docker_socket_gid)
         if mode is not None:
             environment["PIPELINE_DOCKER_BUILD_NETWORK"] = mode
         if failure_message is not None:
@@ -551,6 +564,61 @@ exit 1
         self.assertNotRegex(combined, r"\b172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+\b")
         self.assertNotRegex(combined, r"(?i)C:\\Users\\[^\\\s]+")
         self.assertNotRegex(combined, r"\b5\.202\.100\.(?:100|101)\b")
+
+    def test_controller_docker_command_includes_host_numeric_uid_gid_and_socket_gid(self):
+        result = self.run_launcher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        controller_runs = [
+            line for line in self.commands()
+            if line.startswith("run ") and "fine-tuning-pipeline.role=controller" in line
+        ]
+        self.assertEqual(len(controller_runs), 1)
+        command = controller_runs[0]
+        user_match = re.search(r"--user\s+(\d+:\d+)", command)
+        self.assertIsNotNone(user_match)
+        self.assertNotIn("--user root", command)
+        group_match = re.search(r"--group-add\s+(\d+)", command)
+        self.assertIsNotNone(group_match)
+
+    def test_docker_socket_gid_dynamically_derived_and_not_hardcoded(self):
+        result = self.run_launcher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        controller_runs = [
+            line for line in self.commands()
+            if line.startswith("run ") and "fine-tuning-pipeline.role=controller" in line
+        ]
+        self.assertEqual(len(controller_runs), 1)
+        command = controller_runs[0]
+        group_match = re.search(r"--group-add\s+(\d+)", command)
+        self.assertIsNotNone(group_match)
+        gid = group_match.group(1)
+        self.assertTrue(gid.isdigit())
+
+    def test_missing_docker_socket_fails_safely(self):
+        missing_socket = (self.root / "nonexistent-docker.sock").as_posix()
+        result = self.run_launcher(docker_socket_path=missing_socket)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Docker socket does not exist or is not accessible", result.stderr)
+
+    def test_invalid_non_numeric_docker_socket_gid_fails_safely(self):
+        result = self.run_launcher(docker_socket_gid="invalid_gid")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Unable to determine numeric GID for Docker socket", result.stderr)
+
+    def test_controller_retains_docker_socket_access_contract(self):
+        result = self.run_launcher()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        controller_runs = [
+            line for line in self.commands()
+            if line.startswith("run ") and "fine-tuning-pipeline.role=controller" in line
+        ]
+        self.assertEqual(len(controller_runs), 1)
+        command = controller_runs[0]
+        self.assertIn("--mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock", command)
+        self.assertIn("--read-only", command)
+        self.assertIn("--security-opt no-new-privileges", command)
+        self.assertIn("--tmpfs /tmp:rw,noexec,nosuid,size=64m", command)
+        self.assertIn("fine-tuning-pipeline.role=controller", command)
 
 
 if __name__ == "__main__":

@@ -50,13 +50,94 @@ def tree_size(path: Path) -> int:
     if not path.exists() or path.is_symlink():
         return 0
     total = 0
-    for item in path.rglob("*"):
-        try:
-            if item.is_file() and not item.is_symlink():
-                total += item.stat().st_size
-        except OSError:
-            pass
+    try:
+        for root, _, files in os.walk(path):
+            for filename in files:
+                filepath = Path(root) / filename
+                try:
+                    if filepath.is_file() and not filepath.is_symlink():
+                        total += filepath.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
     return total
+
+
+def find_trusted_helper_image(docker: Docker) -> str | None:
+    for identity in docker.ids(
+        "image", "label=fine-tuning-pipeline.image-role=controller"
+    ):
+        item = docker.inspect("image", identity)
+        labels = item.get("Config", {}).get("Labels", {}) if item else {}
+        if labels.get("fine-tuning-pipeline.image-role") == "controller":
+            return identity
+    for identity in docker.ids(
+        "image", "label=fine-tuning-pipeline.image-role"
+    ):
+        item = docker.inspect("image", identity)
+        labels = item.get("Config", {}).get("Labels", {}) if item else {}
+        if labels.get("fine-tuning-pipeline.image-role") in {
+            "controller",
+            "trainer",
+            "job-preparer",
+        }:
+            return identity
+    return None
+
+
+def safe_rmtree(target: Path, docker: Docker) -> None:
+    if not target.exists():
+        return
+    if target.is_symlink():
+        fail(f"refusing symlink target: {target}")
+    try:
+        shutil.rmtree(target)
+        return
+    except PermissionError:
+        pass
+    except OSError as error:
+        import errno
+
+        if error.errno not in {errno.EACCES, errno.EPERM}:
+            raise
+
+    helper_image = find_trusted_helper_image(docker)
+    if not helper_image:
+        fail(
+            f"cannot remove root-owned directory {target}: no trusted Project 1 helper image available"
+        )
+
+    resolved_target = target.resolve()
+    if resolved_target in {
+        Path("/"),
+        Path("/home"),
+        Path("/srv"),
+        Path("/tmp"),
+        Path(os.environ.get("TMPDIR", "/tmp")),
+    }:
+        fail(f"refusing to delete dangerous path: {resolved_target}")
+
+    result = docker.run(
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--mount",
+        f"type=bind,src={resolved_target},dst=/target",
+        helper_image,
+        "sh",
+        "-c",
+        "rm -rf /target/* /target/.[!.]* /target/..?* 2>/dev/null || true; find /target -mindepth 1 -delete 2>/dev/null || true",
+    )
+    if result.returncode != 0:
+        fail(f"Docker helper deletion failed for {target}: {result.stderr.strip()}")
+
+    try:
+        target.rmdir()
+    except (PermissionError, OSError) as error:
+        if target.exists():
+            fail(f"could not remove directory {target} after helper cleanup: {error}")
 
 
 class Docker:
@@ -346,22 +427,32 @@ def main(argv: list[str] | None = None) -> int:
         target = child(args.runs_root, identity)
         run_bytes += tree_size(target)
         if target.exists():
-            shutil.rmtree(target)
+            safe_rmtree(target, docker)
     state_entries = 0
     execution_root = args.state_root / "executions"
     if execution_root.is_dir():
         for identity in executions:
             target = child(execution_root, identity)
             if target.exists():
-                shutil.rmtree(target)
+                safe_rmtree(target, docker)
                 state_entries += 1
     claims_root = args.state_root / "claims"
     if claims_root.is_dir():
         for identity in executions:
             claim = claims_root / f"{identity}.json"
             if claim.is_file() and not claim.is_symlink():
-                claim.unlink()
-                state_entries += 1
+                try:
+                    claim.unlink()
+                    state_entries += 1
+                except PermissionError:
+                    try:
+                        claim.chmod(0o644)
+                        claim.unlink()
+                        state_entries += 1
+                    except OSError:
+                        pass
+                except OSError:
+                    pass
 
     # Only execution-qualified temp names are eligible; never sweep /tmp broadly.
     temporary = 0
@@ -370,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
             if target.is_symlink() or target.is_file():
                 target.unlink(missing_ok=True)
             elif target.is_dir():
-                shutil.rmtree(target)
+                safe_rmtree(target, docker)
             temporary += 1
 
     images, image_bytes = cleanup_images(docker)

@@ -115,6 +115,22 @@ fi
 TAG_ID=$(printf '%s' "$SOURCE_IDENTITY" | git hash-object --stdin | cut -c1-16)
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
+DOCKER_SOCKET_PATH=${PIPELINE_DOCKER_SOCKET_PATH:-/var/run/docker.sock}
+if [ ! -e "$DOCKER_SOCKET_PATH" ] && [ ! -S "$DOCKER_SOCKET_PATH" ]; then
+    echo "Docker socket does not exist or is not accessible: $DOCKER_SOCKET_PATH" >&2
+    exit 1
+fi
+if [ -z "${PIPELINE_DOCKER_SOCKET_GID-}" ]; then
+    DOCKER_SOCKET_GID=$(stat -c '%g' "$DOCKER_SOCKET_PATH" 2>/dev/null || stat -f '%g' "$DOCKER_SOCKET_PATH" 2>/dev/null || true)
+else
+    DOCKER_SOCKET_GID=$PIPELINE_DOCKER_SOCKET_GID
+fi
+case "$DOCKER_SOCKET_GID" in
+    ''|*[!0-9]*)
+        echo "Unable to determine numeric GID for Docker socket: $DOCKER_SOCKET_PATH" >&2
+        exit 1
+        ;;
+esac
 EXECUTION_ID=exec-$(printf '%s' "$(date -u +%Y%m%dT%H%M%SZ)-$$-$TAG_ID" | git hash-object --stdin | cut -c1-24)
 PIPELINE_ID=${CI_PIPELINE_ID:-local}
 export PIPELINE_EXECUTION_ID=$EXECUTION_ID
@@ -346,6 +362,8 @@ fi
 set -- docker run --rm --read-only --network host \
     --security-opt no-new-privileges \
     --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+    --user "$HOST_UID:$HOST_GID" \
+    --group-add "$DOCKER_SOCKET_GID" \
     --label fine-tuning-pipeline.managed=true \
     --label fine-tuning-pipeline.role=controller \
     --label "fine-tuning-pipeline.execution-id=$EXECUTION_ID" \
