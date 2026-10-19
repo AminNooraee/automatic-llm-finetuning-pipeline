@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +119,22 @@ def _prepare_run(
         input_config_path=config_file,
         console_verbosity=console_verbosity,
     )
+    execution_id = os.environ.get("PIPELINE_EXECUTION_ID")
+    pipeline_id = os.environ.get("CI_PIPELINE_ID")
+    if execution_id:
+        (run.paths.root / "ownership.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "project": "automatic-llm-finetuning-pipeline",
+                    "run_id": run.run_id,
+                    "execution_id": execution_id,
+                    "pipeline_id": pipeline_id,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     if os.environ.get("HF_TOKEN"):
         run.register_secret(os.environ["HF_TOKEN"])
 
@@ -453,6 +470,11 @@ def execute_training(
                 ),
             )
             run.record_verified_artifacts(artifacts)
+            # Checkpoints are recovery artifacts only. Once the final output has
+            # passed verification they are redundant and can be reclaimed.
+            for checkpoint in run.paths.model.glob("checkpoint-*"):
+                if checkpoint.is_dir() and not checkpoint.is_symlink():
+                    shutil.rmtree(checkpoint)
             metrics = {}
             try:
                 metrics = extract_training_metrics(run.paths.model)

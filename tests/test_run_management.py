@@ -1,16 +1,18 @@
 import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 import yaml
 
-from fine_tuning_pipeline.artifact_validator import ArtifactValidationError, validate_model_artifacts
+from fine_tuning_pipeline.artifact_validator import (
+    ArtifactValidationError,
+    validate_model_artifacts,
+)
 from fine_tuning_pipeline.run_manager import RunManager
 from fine_tuning_pipeline.train_pipeline import execute_training
-
 
 TESTS_DIR = Path(__file__).resolve().parent
 
@@ -26,7 +28,7 @@ class RunManagerTests(unittest.TestCase):
         root = self.temporary_project_dir()
         input_config = root / "config.yaml"
         input_config.write_text("model: {}\n", encoding="utf-8")
-        fixed_time = datetime(2026, 9, 16, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_time = datetime(2026, 9, 16, 12, 0, 0, tzinfo=UTC)
 
         first = RunManager.create(
             root / "runs",
@@ -178,6 +180,10 @@ class RunPipelineLifecycleTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (model_dir / "adapter_model.safetensors").write_bytes(b"weights")
+            for number in (1, 2):
+                checkpoint = model_dir / f"checkpoint-{number}"
+                checkpoint.mkdir()
+                (checkpoint / "trainer_state.json").write_text("{}", encoding="utf-8")
             (model_dir / "train_results.json").write_text(
                 json.dumps({"train_loss": 0.75, "train_runtime": 4.0}),
                 encoding="utf-8",
@@ -222,15 +228,39 @@ class RunPipelineLifecycleTests(unittest.TestCase):
         self.assertIn("Starting LLaMA-Factory training", log)
         self.assertIn("mock training output", log)
         self.assertIn("Run completed successfully", log)
+        self.assertEqual(list((run_dir / "model").glob("checkpoint-*")), [])
+
+    def test_failed_training_preserves_resumable_checkpoints(self):
+        root = self.temporary_project_dir()
+
+        def fail_after_checkpoints(yaml_file, **_kwargs):
+            arguments = yaml.safe_load(Path(yaml_file).read_text(encoding="utf-8"))
+            model_dir = Path(arguments["output_dir"])
+            for number in (1, 2):
+                checkpoint = model_dir / f"checkpoint-{number}"
+                checkpoint.mkdir(parents=True, exist_ok=True)
+                (checkpoint / "trainer_state.json").write_text("{}", encoding="utf-8")
+            raise RuntimeError("training process failed")
+
+        with patch(
+            "fine_tuning_pipeline.train_pipeline.run_training",
+            side_effect=fail_after_checkpoints,
+        ), self.assertRaisesRegex(RuntimeError, "training process failed"):
+            execute_training(runs_root=root / "runs")
+
+        run_dir = next((root / "runs").iterdir())
+        self.assertEqual(
+            [path.name for path in sorted((run_dir / "model").glob("checkpoint-*"))],
+            ["checkpoint-1", "checkpoint-2"],
+        )
 
     def test_pipeline_failure_marks_run_and_preserves_error_log(self):
         root = self.temporary_project_dir()
         with patch(
             "fine_tuning_pipeline.train_pipeline.run_training",
             side_effect=RuntimeError("training process failed"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "training process failed"):
-                execute_training(runs_root=root / "runs")
+        ), self.assertRaisesRegex(RuntimeError, "training process failed"):
+            execute_training(runs_root=root / "runs")
 
         runs = list((root / "runs").iterdir())
         self.assertEqual(len(runs), 1)
@@ -246,11 +276,10 @@ class RunPipelineLifecycleTests(unittest.TestCase):
 
     def test_missing_model_artifacts_mark_run_failed(self):
         root = self.temporary_project_dir()
-        with patch("fine_tuning_pipeline.train_pipeline.run_training", return_value=None):
-            with self.assertRaisesRegex(
-                ArtifactValidationError, "Missing LoRA adapter configuration"
-            ):
-                execute_training(runs_root=root / "runs")
+        with patch("fine_tuning_pipeline.train_pipeline.run_training", return_value=None), self.assertRaisesRegex(
+            ArtifactValidationError, "Missing LoRA adapter configuration"
+        ):
+            execute_training(runs_root=root / "runs")
 
         run_dir = next((root / "runs").iterdir())
         metadata = json.loads(

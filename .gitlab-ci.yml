@@ -17,7 +17,7 @@ prepare-user-job:
     - |
       set -eu
 
-      PREPARE_IMAGE="automatic-llm-job-preparer:$CI_COMMIT_SHA"
+      PREPARE_IMAGE="automatic-llm-job-preparer:$CI_PIPELINE_ID-$CI_JOB_ID"
 
       echo "=== PREPARING USER JOB ==="
       echo "Docker build mode: host-dns"
@@ -70,6 +70,11 @@ prepare-user-job:
         python scripts/prepare_ci_job.py
 
       echo "=== USER JOB PREPARED ==="
+
+  after_script:
+    # The preparer runs on the CPU runner, so reclaim its per-job image there.
+    # Docker refuses removal if an unexpected live container still uses it.
+    - docker image rm "automatic-llm-job-preparer:$CI_PIPELINE_ID-$CI_JOB_ID" >/dev/null 2>&1 || true
 
   artifacts:
     paths:
@@ -313,44 +318,39 @@ trigger-phase1-benchmark:
     strategy: depend
 
 
-cleanup-phase1-serving:
+full-cleanup-project1:
   stage: cleanup
+  resource_group: phase1-finetune
 
   tags:
     - worker-server53
 
-  when: manual
+  needs: []
+  dependencies: []
+  rules:
+    - when: manual
   allow_failure: true
-
-  dependencies:
-    - phase1-finetune
 
   script:
     - |
       set -eu
-
-      test -s "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env" || {
-        echo "Missing upstream metadata." >&2
-        exit 1
-      }
-
-      test -s "$CI_PROJECT_DIR/ci_artifacts/project1/registration.json" || {
-        echo "Missing LiteLLM registration artifact." >&2
-        exit 1
-      }
-
-      test -s "$CI_PROJECT_DIR/ci_artifacts/project1/serving_operation.json" || {
-        echo "Missing serving ownership artifact." >&2
-        exit 1
-      }
-
-      . "$CI_PROJECT_DIR/ci_artifacts/project1/upstream.env"
-
-      : "${PROJECT1_RUN_ID:?PROJECT1_RUN_ID is required}"
+      : "${PIPELINE_RUNS_DIR:?PIPELINE_RUNS_DIR is required}"
+      : "${PIPELINE_STATE_DIR:?PIPELINE_STATE_DIR is required}"
+      : "${PIPELINE_HF_CACHE_DIR:?PIPELINE_HF_CACHE_DIR is required}"
       : "${LITELLM_BASE_URL:?LITELLM_BASE_URL is required}"
       : "${LITELLM_API_KEY:?LITELLM_API_KEY is required}"
-
-      python3 scripts/cleanup_phase1_run.py \
-        --run-id "$PROJECT1_RUN_ID" \
-        --registration "$CI_PROJECT_DIR/ci_artifacts/project1/registration.json" \
-        --serving-operation "$CI_PROJECT_DIR/ci_artifacts/project1/serving_operation.json"
+      set -- python3 scripts/full_cleanup.py \
+        --pipeline-id "$CI_PIPELINE_ID" \
+        --runs-root "$PIPELINE_RUNS_DIR" \
+        --state-root "$PIPELINE_STATE_DIR" \
+        --hf-cache-root "$PIPELINE_HF_CACHE_DIR"
+      if [ -n "${FULL_CLEANUP_RUN_ID:-}" ]; then
+        set -- "$@" --run-id "$FULL_CLEANUP_RUN_ID"
+      fi
+      if [ -n "${FULL_CLEANUP_EXECUTION_ID:-}" ]; then
+        set -- "$@" --execution-id "$FULL_CLEANUP_EXECUTION_ID"
+      fi
+      if [ "${PIPELINE_HF_CACHE_DEDICATED:-0}" = "1" ]; then
+        set -- "$@" --hf-cache-dedicated
+      fi
+      "$@"

@@ -116,8 +116,15 @@ TAG_ID=$(printf '%s' "$SOURCE_IDENTITY" | git hash-object --stdin | cut -c1-16)
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
 EXECUTION_ID=exec-$(printf '%s' "$(date -u +%Y%m%dT%H%M%SZ)-$$-$TAG_ID" | git hash-object --stdin | cut -c1-24)
+PIPELINE_ID=${CI_PIPELINE_ID:-local}
+export PIPELINE_EXECUTION_ID=$EXECUTION_ID
 CONTROLLER_IMAGE=automatic-llm-finetuner-controller:$TAG_ID
 TRAINING_IMAGE=automatic-llm-finetuner:$TAG_ID-cuda-u${HOST_UID}g${HOST_GID}
+
+# Durable recovery anchor: created before builds, admission, or training.
+mkdir -p "$STATE_DIR/claims"
+(umask 077 && printf '{"schema_version":1,"project":"automatic-llm-finetuning-pipeline","execution_id":"%s","pipeline_id":"%s"}\n' \
+    "$EXECUTION_ID" "$PIPELINE_ID" > "$STATE_DIR/claims/$EXECUTION_ID.json")
 BUILD_LOG=
 SECRET_DIR=
 PREFLIGHT_DIR=
@@ -155,7 +162,7 @@ run_docker_build_attempt() {
     build_dockerfile=$1
     build_dns_context=$2
     shift 2
-    BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/automatic-llm-build.XXXXXX")
+    BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/automatic-llm-build.$EXECUTION_ID.XXXXXX")
     chmod 600 "$BUILD_LOG"
     build_status=0
     docker build --network=host \
@@ -182,7 +189,8 @@ prepare_dns_context() {
         return 2
     fi
 
-    dns_temp_root=${TMPDIR:-/tmp}
+    dns_temp_template_root=${TMPDIR:-/tmp}
+    dns_temp_root=$dns_temp_template_root
     dns_temp_root=$(CDPATH= cd -- "$dns_temp_root" 2>/dev/null && pwd -P) || {
         echo "Temporary directory is unavailable: $dns_temp_root" >&2
         return 2
@@ -193,6 +201,7 @@ prepare_dns_context() {
                 echo "No temporary directory outside the repository is available." >&2
                 return 2
             }
+            dns_temp_template_root=/tmp
             ;;
     esac
     case "$dns_temp_root" in
@@ -201,10 +210,14 @@ prepare_dns_context() {
             return 2
             ;;
     esac
-    if ! DNS_CONTEXT_DIR=$(mktemp -d "$dns_temp_root/automatic-llm-dns.XXXXXX"); then
+    previous_umask=$(umask)
+    umask 077
+    if ! DNS_CONTEXT_DIR=$(mktemp -d "$dns_temp_template_root/automatic-llm-dns.$EXECUTION_ID.XXXXXX"); then
+        umask "$previous_umask"
         echo "Could not create the temporary DNS build context." >&2
         return 2
     fi
+    umask "$previous_umask"
     if ! chmod 700 "$DNS_CONTEXT_DIR"; then
         cleanup_dns_context
         echo "Could not secure the temporary DNS build context." >&2
@@ -271,7 +284,7 @@ ensure_image "$CONTROLLER_IMAGE" "$PROJECT_DIR/docker/Dockerfile.controller.host
 ensure_image "$TRAINING_IMAGE" "$PROJECT_DIR/docker/Dockerfile.host-dns" cuda
 TRAINING_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$TRAINING_IMAGE")
 
-SECRET_DIR=$(mktemp -d "${TMPDIR:-/tmp}/automatic-llm-secrets.XXXXXX")
+SECRET_DIR=$(mktemp -d "${TMPDIR:-/tmp}/automatic-llm-secrets.$EXECUTION_ID.XXXXXX")
 if [ -n "${LITELLM_API_KEY-}" ]; then
     (umask 077 && printf '%s' "$LITELLM_API_KEY" > "$SECRET_DIR/litellm_api_key")
 fi
@@ -290,6 +303,7 @@ run_resource_preflight_helper() {
         --label fine-tuning-pipeline.managed=true \
         --label fine-tuning-pipeline.role=resource-preflight \
         --label "fine-tuning-pipeline.execution-id=$EXECUTION_ID" \
+        --label "fine-tuning-pipeline.pipeline-id=$PIPELINE_ID" \
         --mount "type=bind,src=$PROJECT_DIR,dst=/workspace/project,readonly" \
         --mount "type=bind,src=$SECRET_DIR,dst=/run/pipeline-secrets,readonly" \
         --mount "type=bind,src=$PREFLIGHT_DIR,dst=/run/resource-preflight"
@@ -335,6 +349,7 @@ set -- docker run --rm --read-only --network host \
     --label fine-tuning-pipeline.managed=true \
     --label fine-tuning-pipeline.role=controller \
     --label "fine-tuning-pipeline.execution-id=$EXECUTION_ID" \
+    --label "fine-tuning-pipeline.pipeline-id=$PIPELINE_ID" \
     --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
     --mount "type=bind,src=$PROJECT_DIR,dst=/workspace/project,readonly" \
     --mount "type=bind,src=$DATASETS_DIR,dst=/workspace/datasets,readonly" \
@@ -343,6 +358,7 @@ set -- docker run --rm --read-only --network host \
     --mount "type=bind,src=$STATE_DIR,dst=/workspace/state" \
     --mount "type=bind,src=$SECRET_DIR,dst=/run/pipeline-secrets,readonly" \
     --env "PIPELINE_EXECUTION_ID=$EXECUTION_ID" \
+    --env "CI_PIPELINE_ID=$PIPELINE_ID" \
     --env "PIPELINE_CONFIG_RELATIVE=$CONFIG_REL" \
     --env "PIPELINE_HOST_PROJECT_DIR=$PROJECT_DIR" \
     --env "PIPELINE_HOST_DATASETS_DIR=$DATASETS_DIR" \

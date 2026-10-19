@@ -1,8 +1,9 @@
 """Validation and LLaMA-Factory translation for training configuration."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
-from typing import Any, Mapping
+from typing import Any
 
 
 class TrainingConfigError(ValueError):
@@ -48,7 +49,10 @@ class TrainingConfig:
             "bf16": self.precision == "bf16",
             "gradient_checkpointing": self.gradient_checkpointing,
             "cutoff_len": self.cutoff_len,
-            "save_steps": self.save_steps,
+            # Epoch checkpoints avoid excessive writes while the hard limit keeps
+            # failed/interrupted runs resumable without unbounded disk growth.
+            "save_strategy": "epoch",
+            "save_total_limit": 2,
             "logging_steps": self.logging_steps,
         }
         if self.lora is not None:

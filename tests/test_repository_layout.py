@@ -104,6 +104,14 @@ class RepositoryLayoutTests(unittest.TestCase):
         self.assertEqual(phase["variables"]["PIPELINE_RESOURCE_PREFLIGHT"], "1")
         self.assertEqual(phase["variables"]["GPU_DEVICE"], "auto")
         self.assertNotIn("GPU_MIN_FREE_MIB", phase["variables"])
+        cleanup = ci["full-cleanup-project1"]
+        self.assertEqual(cleanup["needs"], [])
+        self.assertEqual(cleanup["dependencies"], [])
+        self.assertEqual(cleanup["resource_group"], "phase1-finetune")
+        self.assertEqual(cleanup["rules"], [{"when": "manual"}])
+        cleanup_script = "\n".join(cleanup["script"])
+        self.assertIn('--pipeline-id "$CI_PIPELINE_ID"', cleanup_script)
+        self.assertNotIn("ci_artifacts/project1", cleanup_script)
 
     def test_installed_import_and_default_config_ignore_working_directory(self):
         environment = os.environ.copy()

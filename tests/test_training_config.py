@@ -4,9 +4,14 @@ from pathlib import Path
 
 import yaml
 
-from fine_tuning_pipeline.train_pipeline import PIPELINE_DIR
-from fine_tuning_pipeline.training_config import TrainingConfigError, resolve_training_config
-from fine_tuning_pipeline.yaml_generator import build_llamafactory_config, generate_training_yaml
+from fine_tuning_pipeline.training_config import (
+    TrainingConfigError,
+    resolve_training_config,
+)
+from fine_tuning_pipeline.yaml_generator import (
+    build_llamafactory_config,
+    generate_training_yaml,
+)
 
 
 def valid_training_config():
@@ -81,7 +86,8 @@ class TrainingConfigurationTests(unittest.TestCase):
                 "bf16": True,
                 "gradient_checkpointing": True,
                 "cutoff_len": 2048,
-                "save_steps": 100,
+                "save_strategy": "epoch",
+                "save_total_limit": 2,
                 "logging_steps": 10,
                 "lora_rank": 8,
                 "lora_alpha": 16,
@@ -125,9 +131,8 @@ class TrainingConfigurationTests(unittest.TestCase):
         cases.append((missing, "Missing required training parameter.*logging_steps"))
 
         for raw_config, expected_error in cases:
-            with self.subTest(expected_error=expected_error):
-                with self.assertRaisesRegex(TrainingConfigError, expected_error):
-                    resolve_training_config(raw_config)
+            with self.subTest(expected_error=expected_error), self.assertRaisesRegex(TrainingConfigError, expected_error):
+                resolve_training_config(raw_config)
 
     def test_lora_section_is_method_specific(self):
         missing_lora = valid_training_config()
@@ -183,7 +188,9 @@ class TrainingConfigurationTests(unittest.TestCase):
         self.assertIs(loaded["disable_gradient_checkpointing"], False)
         self.assertNotIn("gradient_checkpointing", loaded)
         self.assertEqual(loaded["cutoff_len"], 2048)
-        self.assertEqual(loaded["save_steps"], 100)
+        self.assertEqual(loaded["save_strategy"], "epoch")
+        self.assertEqual(loaded["save_total_limit"], 2)
+        self.assertNotIn("save_steps", loaded)
         self.assertEqual(loaded["logging_steps"], 10)
         self.assertEqual(loaded["lora_rank"], 8)
         self.assertEqual(loaded["lora_alpha"], 16)

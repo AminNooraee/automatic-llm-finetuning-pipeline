@@ -385,6 +385,8 @@ class PipelineController:
         command.extend((
             "--env", f"PIPELINE_TRAINING_IMAGE={training_image}",
             "--env", f"PIPELINE_TRAINING_IMAGE_ID={training_image_id}",
+            "--env", f"PIPELINE_EXECUTION_ID={execution_id}",
+            "--env", f"CI_PIPELINE_ID={os.environ.get('CI_PIPELINE_ID', 'local')}",
             training_image,
             "python", "-m", "fine_tuning_pipeline.orchestration.training_worker",
             "--config", f"/workspace/state/executions/{execution_id}/worker_config.yaml",

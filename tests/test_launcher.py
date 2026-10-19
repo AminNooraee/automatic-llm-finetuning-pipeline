@@ -225,6 +225,13 @@ exit 1
     def contexts(self):
         return self.context_log.read_text(encoding="utf-8").splitlines() if self.context_log.exists() else []
 
+    @staticmethod
+    def native_path(path):
+        value = str(path).replace("\\", "/")
+        if os.name == "nt" and len(value) > 2 and value[0] == "/" and value[2] == "/":
+            value = f"{value[1]}:{value[2:]}"
+        return Path(value)
+
     def test_default_environment_directly_uses_host_dns(self):
         result = self.run_launcher(build_dns="192.0.2.53")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -409,13 +416,21 @@ exit 1
         result = self.run_launcher(mode="host-dns", build_dns="192.0.2.53")
         self.assertEqual(result.returncode, 0, result.stderr)
         permissions = [line for line in self.evidence.read_text().splitlines() if line.startswith("dir-mode=")]
-        self.assertEqual(permissions, ["dir-mode=700 file-mode=644"] * 2)
+        expected_directory_mode = "755" if os.name == "nt" else "700"
+        self.assertEqual(
+            permissions,
+            [f"dir-mode={expected_directory_mode} file-mode=644"] * 2,
+        )
 
     def test_host_dns_context_is_removed_after_success(self):
         result = self.run_launcher(mode="host-dns", build_dns="192.0.2.53")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.contexts())
-        self.assertTrue(all(Path(path).parent == self.external_tmp for path in self.contexts()))
+        # MSYS may expose the same Windows temp directory as either C:/... or
+        # /tmp/... when forwarding it through the fake Docker executable.
+        self.assertTrue(
+            all(self.native_path(path).parent.name == self.external_tmp.name for path in self.contexts())
+        )
         self.assertTrue(all(not Path(path).is_relative_to(self.root) for path in self.contexts()))
         self.assertTrue(all(not Path(path).exists() for path in self.contexts()))
 
